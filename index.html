@@ -222,7 +222,7 @@ function msgErro(e){const m=(e&&(e.message||e.error_description))||'Erro inesper
   if(/exceeded the maximum allowed size|Payload too large/i.test(m))return 'A foto é grande demais. Tente outra.';
   if(/Failed to fetch|NetworkError/i.test(m))return 'Sem conexão com a internet. Tente de novo.';
   return m;}
-const NOMES_ACAO={registrar_compra:'Registrou compra nos EUA',excluir_compra:'Excluiu compra',criar_envio:'Criou envio para o Brasil',atualizar_custos_envio:'Alterou frete/imposto de envio',marcar_alfandega:'Marcou envio na alfândega',cancelar_envio:'Cancelou envio',confirmar_chegada:'Confirmou chegada no Brasil',desfazer_chegada:'Desfez chegada',encaminhar:'Encaminhou mercadoria',desfazer_encaminhamento:'Desfez encaminhamento',definir_papel:'Alterou acesso de usuário',definir_foto:'Anexou/alterou foto de produto',editar_produto:'Editou produto',cadastrar_produto:'Cadastrou produto',lancar_custos_entrada:'Lançou preço de custo de envio'};
+const NOMES_ACAO={registrar_compra:'Registrou compra nos EUA',excluir_compra:'Excluiu compra',criar_envio:'Criou envio para o Brasil',atualizar_custos_envio:'Alterou frete/imposto de envio',marcar_alfandega:'Marcou envio na alfândega',cancelar_envio:'Cancelou envio',confirmar_chegada:'Confirmou chegada no Brasil',desfazer_chegada:'Desfez chegada',encaminhar:'Encaminhou mercadoria',desfazer_encaminhamento:'Desfez encaminhamento',definir_papel:'Alterou acesso de usuário',definir_foto:'Anexou/alterou foto de produto',editar_produto:'Editou produto',cadastrar_produto:'Cadastrou produto',lancar_custos_entrada:'Lançou preço de custo de envio',lancar_custo_produto:'Lançou preço de custo do produto'};
 function log(ev,d){try{sb.rpc('registrar_acesso',{p_evento:ev,p_detalhe:d==null?null:String(d).slice(0,300)}).then(()=>{},()=>{});}catch(e){}}
 async function rpc(fn,args){const {data,error}=await sb.rpc(fn,args||{});if(error)throw error;if(NOMES_ACAO[fn])log('acao',NOMES_ACAO[fn]);return data;}
 
@@ -346,7 +346,7 @@ function abaProdutos(){
   return barraBusca('Buscar produto ou SKU…',podeCusto()?'<button class="primary" data-act="produto">+ Produto</button><button data-act="envio">+ Novo envio</button>':'')+
   `<div class="lista">${lst.length?lst.map(p=>{const c=um(p.produtos_custo),x=resumoProd(p.id);
     return `<div class="card click" data-prod="${p.id}"><div class="pinfo">${foto(p)}<div><div class="t">${esc(p.nome)}</div>
-    <div class="meta">${[p.sku?'SKU/EAN '+esc(p.sku):'Sem SKU',verCusto()&&c&&c.qtd_eua?'<b>'+un(c.qtd_eua)+'</b> nos EUA':'',x.cam?'<b>'+un(x.cam)+'</b> a caminho':'',verCusto()&&x.ult?'Último custo final <b>'+brl(x.ult)+'</b>':''].filter(Boolean).join(' · ')}</div>${p.foto_url?'':'<div class="semfoto">Sem foto</div>'}</div></div>
+    <div class="meta">${[p.sku?'SKU/EAN '+esc(p.sku):'Sem SKU',verCusto()&&c&&c.qtd_eua?'<b>'+un(c.qtd_eua)+'</b> nos EUA':'',x.cam?'<b>'+un(x.cam)+'</b> a caminho':'',verCusto()&&x.ult?'Último custo final <b>'+brl(x.ult)+'</b>':'',verCusto()&&c&&+c.custo_medio_usd>0?'Custo <b>'+usd(c.custo_medio_usd,2)+'</b>':''].filter(Boolean).join(' · ')}</div>${verCusto()&&!(c&&+c.custo_medio_usd>0)?'<div class="warn">⚠ Preço de custo a lançar</div>':''}${p.foto_url?'':'<div class="semfoto">Sem foto</div>'}</div></div>
     <div class="dir"><div class="n">${un(x.dep)} un.</div><div class="meta">no Brasil</div></div></div>`;}).join('')
     :`<div class="vazio">${D.produtos.length?'Nada encontrado.':(podeCusto()?'Nenhum produto cadastrado. Toque em <b>+ Produto</b> para lançar o primeiro.':'Nenhum produto cadastrado ainda.')}</div>`}</div>`;
 }
@@ -518,8 +518,9 @@ function modalProduto(pid){
    ${verCusto()&&c?`<div class="kpi"><div class="n">${usd(c.custo_medio_usd)}</div><div class="l">Custo médio ${brl(c.custo_medio)}</div></div>`:''}</div>
   ${verCusto()&&comps.length?`<h3>Últimas compras</h3><div class="scroll"><table class="planilha"><tr><th>Data</th><th>Loja</th><th class="n">Qtd</th><th class="n">US$</th><th class="n">R$</th></tr>${comps.map(e=>`<tr><td>${fd(e.data)}</td><td>${esc(e.loja||'')}</td><td class="n">${un(e.qtd)}</td><td class="n">${usd(e.custo_usd,4)}</td><td class="n">${brl(e.custo_unit,4)}</td></tr>`).join('')}</table></div>`:''}
   ${envs.length?`<h3>Envios</h3><div class="scroll"><table class="planilha"><tr><th>Envio</th><th>Saída</th><th>Situação</th><th class="n">Enviado</th><th class="n">No depósito</th>${verCusto()?'<th class="n">Custo Brasil</th>':''}</tr>${envs.slice(0,10).map(({r,i})=>`<tr><td>#${r.id} ${esc(r.transportadora)}</td><td>${fd(r.data_saida)}</td><td>${STATUS[r.status][0]}</td><td class="n">${un(i.qtd_enviada)}</td><td class="n">${un(i.disp)}</td>${verCusto()?`<td class="n">${i.custo?brl(i.custo.custo_br,4):''}</td>`:''}</tr>`).join('')}</table></div>`:''}
-  <div class="erro"></div><div class="rodape">${podeCusto()?'<button id="pf_etq">Etiquetas</button>':''}<button id="cx">Fechar</button></div>`);
+  <div class="erro"></div><div class="rodape">${podeCusto()?'<button id="pf_etq">Etiquetas</button><button class="primary" id="pf_cus">'+(c&&+c.custo_medio_usd>0?'Alterar preço de custo':'Lançar preço de custo')+'</button>':''}<button id="cx">Fechar</button></div>`);
   $('cx').onclick=fechar;
+  if($('pf_cus'))$('pf_cus').onclick=()=>modalCustoProduto(pid);
   if($('pf_edt'))$('pf_edt').onclick=()=>{abrir(`<h2>Editar produto</h2><div class="campo"><label>Nome</label><input id="ep_n" value="${esc(p.nome)}"></div><div class="campo"><label>SKU / EAN</label><input id="ep_s" value="${esc(p.sku||'')}"></div>
     <div class="erro"></div><div class="rodape"><button id="cx">Voltar</button><button class="primary" id="ok">Salvar</button></div>`);
     $('cx').onclick=()=>modalProduto(pid);$('ok').onclick=()=>rodar($('ok'),async()=>{await rpc('editar_produto',{p_produto:pid,p_nome:val('ep_n'),p_sku:val('ep_s')});await carregar();toast('Produto atualizado.');modalProduto(pid);});};
@@ -534,6 +535,29 @@ function modalProduto(pid){
     $('pf_arq').onchange=()=>{const f=$('pf_arq').files[0];if(!f)return;const b=$('pf_tirar'),rot=b.textContent;b.textContent='Enviando foto…';
       rodar(b,async()=>{try{await enviarFoto(pid,f);}catch(e){b.textContent=rot;$('pf_arq').value='';throw e;}toast('Foto salva.');render();modalProduto(pid);});};}
   if($('pf_rem'))$('pf_rem').onclick=()=>rodar($('pf_rem'),async()=>{const ant=p.foto_url;await rpc('definir_foto',{p_produto:pid,p_url:''});apagarFotoAntiga(ant);p.foto_url=null;toast('Foto removida.');render();modalProduto(pid);});
+}
+
+function modalCustoProduto(pid){
+  const p=D.produtos.find(x=>x.id===pid);if(!p)return;const c=um(p.produtos_custo),br=v=>String(+v).replace('.',',');
+  const temCusto=c&&+c.custo_medio_usd>0;
+  const semC=D.compras.filter(e=>e.produto_id===pid&&!(+e.custo_usd>0)).length;
+  let semE=0;D.envios.forEach(r=>{if(r.status==='cancelado')return;itensEnv(r).forEach(i=>{if(i.produto_id===pid&&!(i.custo&&+i.custo.custo_usd_saida>0))semE++;});});
+  abrir(`<h2>Preço de custo — ${esc(p.nome)}</h2><div class="sub">Informe o custo unitário pago nos EUA. O sistema grava nas compras e nos envios deste produto que estão sem custo e recalcula o custo médio. Frete e imposto continuam sendo lançados no envio.</div>
+  <div class="duas"><div class="campo"><label>Custo unitário (US$)</label><input id="cp_u" inputmode="decimal" placeholder="0,00" value="${temCusto?br(c.custo_medio_usd):''}"></div>
+  <div class="campo"><label>Cotação do dólar (R$)</label><input id="cp_k" inputmode="decimal" placeholder="5,40" value="${esc(lerPref('iron_cotacao',''))}"></div></div>
+  <div class="meta">Sem custo agora: <b>${un(semC)}</b> compra(s) e <b>${un(semE)}</b> item(ns) de envio.</div>
+  <label class="meta" style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="cp_s" style="width:auto"> Substituir também o custo já lançado deste produto</label>
+  <div class="total" id="cp_prev"></div>
+  <div class="erro"></div><div class="rodape"><button id="cx">Voltar</button><button class="primary" id="ok">Salvar preço de custo</button></div>`);
+  const prev=()=>{const u=dinheiro(val('cp_u')),k=dinheiro(val('cp_k'));$('cp_prev').innerHTML=isNaN(u)||isNaN(k)?'Preencha custo e cotação.':`${usd(u,2)} × ${k.toLocaleString('pt-BR')} = <b>${brl(u*k,2)}</b> por unidade (sem frete e imposto)`;};
+  $('cp_u').oninput=prev;$('cp_k').oninput=prev;prev();
+  $('cx').onclick=()=>modalProduto(pid);
+  $('ok').onclick=()=>{const u=dinheiro(val('cp_u')),k=dinheiro(val('cp_k')),er=$('modal').querySelector('.erro');
+    if(isNaN(u)||u<=0){er.textContent='Informe o custo unitário em dólar.';return;}
+    if(isNaN(k)||k<=0){er.textContent='Informe a cotação do dólar.';return;}
+    gravarPref('iron_cotacao',val('cp_k'));
+    rodar($('ok'),async()=>{const r=await rpc('lancar_custo_produto',{p_produto:pid,p_custo_usd:u,p_cotacao:k,p_substituir:$('cp_s').checked});
+      toast('Preço de custo salvo'+(r?` (${r.compras} compra(s), ${r.itens_envio} item(ns) de envio)`:'')+'.');await carregar();modalProduto(pid);});};
 }
 
 // ---------- etiquetas ----------
