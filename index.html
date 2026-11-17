@@ -537,6 +537,7 @@ function modalProduto(pid){
   if($('pf_rem'))$('pf_rem').onclick=()=>rodar($('pf_rem'),async()=>{const ant=p.foto_url;await rpc('definir_foto',{p_produto:pid,p_url:''});apagarFotoAntiga(ant);p.foto_url=null;toast('Foto removida.');render();modalProduto(pid);});
 }
 
+function cotPadrao(){const u=lerPref('iron_cotacao','');if(u)return u;const c=(D.compras||[]).find(e=>+e.cotacao>0);return c?String(+c.cotacao).replace('.',','):'5,40';}
 function modalCustoProduto(pid){
   const p=D.produtos.find(x=>x.id===pid);if(!p)return;const c=um(p.produtos_custo),br=v=>String(+v).replace('.',',');
   const temCusto=c&&+c.custo_medio_usd>0;
@@ -544,7 +545,7 @@ function modalCustoProduto(pid){
   let semE=0;D.envios.forEach(r=>{if(r.status==='cancelado')return;itensEnv(r).forEach(i=>{if(i.produto_id===pid&&!(i.custo&&+i.custo.custo_usd_saida>0))semE++;});});
   abrir(`<h2>Preço de custo — ${esc(p.nome)}</h2><div class="sub">Informe o custo unitário pago nos EUA. O sistema grava nas compras e nos envios deste produto que estão sem custo e recalcula o custo médio. Frete e imposto continuam sendo lançados no envio.</div>
   <div class="duas"><div class="campo"><label>Custo unitário (US$)</label><input id="cp_u" inputmode="decimal" placeholder="0,00" value="${temCusto?br(c.custo_medio_usd):''}"></div>
-  <div class="campo"><label>Cotação do dólar (R$)</label><input id="cp_k" inputmode="decimal" placeholder="5,40" value="${esc(lerPref('iron_cotacao',''))}"></div></div>
+  <div class="campo"><label>Cotação do dólar (R$)</label><input id="cp_k" inputmode="decimal" placeholder="5,40" value="${esc(cotPadrao())}"></div></div>
   <div class="meta">Sem custo agora: <b>${un(semC)}</b> compra(s) e <b>${un(semE)}</b> item(ns) de envio.</div>
   <label class="meta" style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="cp_s" style="width:auto"> Substituir também o custo já lançado deste produto</label>
   <div class="total" id="cp_prev"></div>
@@ -651,7 +652,7 @@ function modalEnvio(){
 // ---------- preço de custo na entrada (rateio de frete e imposto) ----------
 function blocoCustos(r){
   const c=um(r.envios_custo)||{},it=itensEnv(r),br=v=>String(+v).replace('.',',');
-  const cot=c.cotacao?br(c.cotacao):lerPref('iron_cotacao','');
+  const cot=c.cotacao?br(c.cotacao):cotPadrao();
   return `<h3>Preço de custo</h3>
   <div class="tres"><div class="campo"><label>Cotação do dólar (R$)</label><input id="k_cot" inputmode="decimal" placeholder="5,40" value="${esc(cot)}"></div>
   <div class="campo"><label>Frete total (R$)</label><input id="k_fr" inputmode="decimal" placeholder="0,00" value="${+c.frete?br(c.frete):''}"></div>
