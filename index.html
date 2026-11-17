@@ -528,7 +528,7 @@ function abaPainel(){
   const alf=D.envios.filter(r=>NA_ALF.includes(r.status));
   const tf=transitoFull(null),nf=noFull(null),dv=divAbertas();
   const porWh=D.warehouses.map(w=>({w,l:br.filter(x=>x.wh===w.id).reduce((s,x)=>s+x.livre,0),r:br.filter(x=>x.wh===w.id).reduce((s,x)=>s+x.reserv,0)}));
-  const contas={};D.full.forEach(f=>(f.envio_full_itens||[]).forEach(i=>{const k=f.marketplace+(f.conta?' · '+f.conta:'');contas[k]=(contas[k]||0)+i.qtd_recebida;}));
+  const contas={};D.full.filter(f=>f.status!=='cancelado').forEach(f=>(f.envio_full_itens||[]).forEach(i=>{if(!i.qtd_recebida)return;const k=f.marketplace+(f.conta?' · '+f.conta:'');contas[k]=(contas[k]||0)+i.qtd_recebida;}));
   let fin='';
   if(tem('ver_financeiro')){const m=hoje().slice(0,7);const L=D.lancamentos.filter(l=>l.situacao!=='cancelado');
     const mes=L.filter(l=>String(l.data).slice(0,7)===m),aPagar=L.filter(l=>l.situacao==='pendente');
@@ -1210,7 +1210,7 @@ function abaFull(){
   const f={abertos:x=>['preparacao','conferido'].includes(x.status),transito:x=>['enviado','parcial'].includes(x.status),div:x=>x.status==='divergencia',rec:x=>x.status==='recebido',todos:()=>true}[filtroFull];
   const lst=D.full.filter(f).filter(x=>bate('#'+x.id,x.marketplace,x.conta,x.identificador,x.cd_destino,...(x.envio_full_itens||[]).map(i=>nomeP(i.produto_id))));
   const n=fn=>D.full.filter(fn).length;
-  const contas={};D.full.forEach(x=>(x.envio_full_itens||[]).forEach(i=>{const k=x.marketplace+(x.conta?' · '+x.conta:'');contas[k]=(contas[k]||0)+i.qtd_recebida;}));
+  const contas={};D.full.filter(x=>x.status!=='cancelado').forEach(x=>(x.envio_full_itens||[]).forEach(i=>{if(!i.qtd_recebida)return;const k=x.marketplace+(x.conta?' · '+x.conta:'');contas[k]=(contas[k]||0)+i.qtd_recebida;}));
   return barraBusca('Buscar envio, conta, identificador ou produto…',tem('full')?'<button class="primary" data-act="full">+ Envio para o Full</button>':'')+
   `<div class="resumo">${kpi(un(transitoFull(null)),'Em trânsito para o Full')}${Object.entries(contas).map(([k,v])=>kpi(un(v),'Confirmado · '+esc(k))).join('')||kpi('0','Confirmado no Full')}</div>
   <div class="chips" style="margin-bottom:10px">${chip(filtroFull,'abertos','Em preparação / conferidos ('+n(x=>['preparacao','conferido'].includes(x.status))+')','ffull')}${chip(filtroFull,'transito','Enviados ('+n(x=>['enviado','parcial'].includes(x.status))+')','ffull')}${chip(filtroFull,'div','Com divergência ('+n(x=>x.status==='divergencia')+')','ffull')}${chip(filtroFull,'rec','Recebidos','ffull')}${chip(filtroFull,'todos','Todos','ffull')}</div>
