@@ -2,6 +2,7 @@
 <html lang="pt-BR" translate="no">
 <head>
 <meta charset="utf-8">
+<script>if(location.protocol==='http:'&&/ironimportestoque\.com\.br$/.test(location.hostname))location.replace('https://'+location.host+location.pathname+location.search+location.hash);</script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="google" content="notranslate">
 <title>Iron Import Estoque</title>
@@ -154,6 +155,7 @@ input:focus,select:focus,textarea:focus{outline:2px solid #000;border-color:tran
 .scan{border:2px solid #000;border-radius:12px;padding:10px;margin:10px 0;background:#fafafa}.scanlin{display:flex;gap:8px}.scanlin input{font-size:16px;font-weight:600}
 .scanmsg{font-size:14px;margin-top:6px;font-weight:600;padding:6px 8px;border-radius:8px}.scanmsg.ok{background:#000;color:#fff}.scanmsg.err{background:#fff;color:#000;border:2px dashed #000}
 .scanmsg.pisca{animation:pisca .35s}@keyframes pisca{0%{transform:scale(1.03)}100%{transform:scale(1)}}
+input.lido{outline:3px solid #1a7f37;background:#eaf7ee}
 #sc_cambox video{width:100%;max-height:260px;border-radius:10px;margin-top:8px;background:#000}
 input.excede{outline:2px dashed #000;font-weight:700}
 .item.estorn{opacity:.55}
@@ -261,7 +263,7 @@ function log(ev,d){try{sb.rpc('registrar_acesso',{p_evento:ev,p_detalhe:d==null?
 async function rpc(fn,args){const {data,error}=await sb.rpc(fn,args||{});if(error)throw error;if(NOMES_ACAO[fn])log('acao',NOMES_ACAO[fn]);return data;}
 
 // ---------- modal ----------
-function abrir(html){const m0=$('modal'),m1=m0.cloneNode(false);m0.replaceWith(m1);m1.innerHTML=html;$('ov').classList.remove('hidden');const f=$('modal').querySelector('input:not([type=hidden]):not([type=file]),select,textarea');if(f&&window.innerWidth>700)setTimeout(()=>f.focus(),30);}
+function abrir(html){pararCam();const m0=$('modal'),m1=m0.cloneNode(false);m0.replaceWith(m1);m1.innerHTML=html;$('ov').classList.remove('hidden');const f=$('modal').querySelector('input:not([type=hidden]):not([type=file]),select,textarea');if(f&&window.innerWidth>700)setTimeout(()=>f.focus(),30);}
 function fechar(){$('ov').classList.add('hidden');$('modal').innerHTML='';}
 $('ov').addEventListener('mousedown',e=>{if(e.target.id==='ov')fechar();});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('ov').classList.contains('hidden'))fechar();});
@@ -428,13 +430,39 @@ function acharCodigo(cod){const n=normCod(cod);if(!n)return null;
   for(const p of D.produtos){if(p.codigo_caixa&&normCod(p.codigo_caixa)===n)return {p,mult:p.un_por_caixa||1,caixa:true};}
   for(const p of D.produtos){for(const c of ['ean','upc','sku'])if(p[c]&&normCod(p[c])===n)return {p,mult:1,caixa:false};}
   return null;}
-function scanHtml(rot){const cam='BarcodeDetector' in window&&navigator.mediaDevices&&window.isSecureContext;
+// câmera: usa o leitor nativo do navegador (Android/Chrome) ou a biblioteca ZXing (iPhone e demais)
+function camPossivel(){return !!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia);}
+let _zx=null;
+function carregarZX(){return _zx||(_zx=new Promise((ok,er)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js';
+  s.onload=()=>window.ZXing?ok(window.ZXing):er(new Error('x'));s.onerror=()=>{_zx=null;er(new Error('x'));};document.head.appendChild(s);}));}
+function scanMsg(t,h){const m=$('sc_msg');if(!m)return;m.className='scanmsg '+t;m.textContent=h;clearTimeout(scanMsg.t);m.classList.add('pisca');scanMsg.t=setTimeout(()=>m.classList.remove('pisca'),350);}
+async function abrirCamera(onCode,unica){
+  const box=$('sc_cambox'),v=$('sc_vid'),cb=$('sc_cam');if(!box)return;
+  if(window._cam){pararCam();return;}
+  if(!camPossivel()){scanMsg('err',window.isSecureContext?'Este navegador não libera a câmera. Use o Chrome (Android) ou o Safari (iPhone).':'A câmera só funciona no endereço seguro (https://). Recarregue a página.');return;}
+  let ult='',ultT=0;const achou=c=>{c=String(c||'').trim();if(!c)return;const t=Date.now();if(c===ult&&t-ultT<1500)return;ult=c;ultT=t;if(navigator.vibrate)navigator.vibrate(60);if(unica)pararCam();onCode(c);};
+  window._cam={parar:()=>{}};box.classList.remove('hidden');if(cb)cb.textContent='Fechar câmera';scanMsg('','Aponte a câmera para o código de barras…');
+  const vid={video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}};
+  try{let nativo=false;
+    if('BarcodeDetector' in window){try{const f=await BarcodeDetector.getSupportedFormats();nativo=f.includes('ean_13');}catch(e){}}
+    if(nativo){const det=new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf','qr_code','data_matrix']});
+      const st=await navigator.mediaDevices.getUserMedia(vid);if(!window._cam){st.getTracks().forEach(t=>t.stop());return;}
+      v.srcObject=st;await v.play();window._cam={parar:()=>st.getTracks().forEach(t=>t.stop())};
+      const loop=async()=>{if(!window._cam)return;try{const c=await det.detect(v);if(c[0])achou(c[0].rawValue);}catch(e){}if(window._cam)setTimeout(loop,180);};loop();}
+    else{const Z=await carregarZX();if(!window._cam)return;const B=Z.BarcodeFormat,h=new Map();
+      h.set(Z.DecodeHintType.POSSIBLE_FORMATS,[B.EAN_13,B.EAN_8,B.UPC_A,B.UPC_E,B.CODE_128,B.CODE_39,B.ITF,B.QR_CODE,B.DATA_MATRIX]);h.set(Z.DecodeHintType.TRY_HARDER,true);
+      const r=new Z.BrowserMultiFormatReader(h,250);window._cam={parar:()=>{try{r.reset();}catch(e){}}};
+      await r.decodeFromConstraints(vid,v,res=>{if(res&&window._cam)achou(res.getText());});}
+  }catch(e){pararCam();bip(false);
+    scanMsg('err',e&&e.name==='NotAllowedError'?'A câmera foi bloqueada. Libere o acesso à câmera para este site nas configurações do navegador e tente de novo.':e&&e.name==='NotFoundError'?'Nenhuma câmera encontrada neste aparelho.':'Não foi possível abrir a câmera. Use o leitor ou digite o código.');}
+}
+function scanHtml(rot){const cam=camPossivel()||(!window.isSecureContext&&/^http:/.test(location.href));
   return `<div class="scan"><div class="scanlin"><input id="sc_in" placeholder="${rot||'Bipe o código de barras aqui (ou digite e tecle Enter)'}" autocomplete="off" enterkeyhint="done">${cam?'<button class="small" id="sc_cam" type="button">📷 Câmera</button>':''}</div>
   <div id="sc_msg" class="scanmsg">Leitor pronto · UPC, EAN ou SKU · código da caixa soma as unidades da caixa.</div><div id="sc_cambox" class="hidden"><video id="sc_vid" playsinline muted></video></div></div>`;}
 // o: {nome:'compra', itens:[{k,pid,esp}], atual:k=>n, somar:(k,n,origem)=>{}, livre:bool (permite passar do esperado)}
 function ligarScan(o){
   const inp=$('sc_in');if(!inp)return;let ts=[];
-  const msg=(t,h)=>{const m=$('sc_msg');if(!m)return;m.className='scanmsg '+t;m.textContent=h;clearTimeout(msg.t);m.classList.add('pisca');msg.t=setTimeout(()=>m.classList.remove('pisca'),350);};
+  const msg=scanMsg;
   const proc=(cod,origem)=>{cod=String(cod||'').trim();if(!cod)return;const r=acharCodigo(cod);
     if(!r){bip(false);msg('err',`✗ Código ${cod} não está cadastrado em nenhum produto. Cadastre o código no produto ou lance a quantidade à mão.`);return;}
     const cands=o.itens.filter(i=>i.pid===r.p.id);
@@ -446,16 +474,10 @@ function ligarScan(o){
     msg(at+r.mult>it.esp?'err':'ok',`${at+r.mult>it.esp?'⚠ ACIMA DO ESPERADO · ':'✓ '}${r.p.nome}${r.p.variacao?' ('+r.p.variacao+')':''} +${r.mult}${r.caixa?' · CAIXA com '+r.mult+' un.':' · unidade'} → ${un(at+r.mult)} de ${un(it.esp)}${origem==='manual'?' · digitado à mão':''}`);};
   inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();const rap=ts.length>=4&&(ts[ts.length-1]-ts[0])/(ts.length-1)<45;const v=inp.value;ts=[];inp.value='';proc(v,rap?'scanner':'manual');return;}
     if(e.key.length===1)ts.push(performance.now());});
-  setTimeout(()=>inp.focus(),60);
-  const cb=$('sc_cam');if(cb)cb.onclick=async()=>{const box=$('sc_cambox'),v=$('sc_vid');
-    if(!box.classList.contains('hidden')){pararCam();return;}
-    try{const det=new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf','qr_code','data_matrix']});
-      const st=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});v.srcObject=st;await v.play();box.classList.remove('hidden');cb.textContent='Fechar câmera';
-      let ult='',ultT=0;window._cam=st;
-      const loop=async()=>{if(!window._cam)return;try{const c=await det.detect(v);if(c[0]){const t=Date.now();if(c[0].rawValue!==ult||t-ultT>1500){ult=c[0].rawValue;ultT=t;proc(ult,'camera');}}}catch(e){}setTimeout(loop,250);};loop();
-    }catch(e){msg('err','Não foi possível abrir a câmera neste aparelho/navegador. Use o leitor ou digite o código.');}};
+  if(!(window.matchMedia&&matchMedia('(pointer:coarse)').matches))setTimeout(()=>inp.focus(),60);
+  const cb=$('sc_cam');if(cb)cb.onclick=()=>abrirCamera(c=>proc(c,'camera'));
 }
-function pararCam(){if(window._cam){window._cam.getTracks().forEach(t=>t.stop());window._cam=null;}const b=$('sc_cambox');if(b)b.classList.add('hidden');const c=$('sc_cam');if(c)c.textContent='📷 Câmera';}
+function pararCam(){if(window._cam){const c=window._cam;window._cam=null;try{c.parar();}catch(e){}}const vv=$('sc_vid');if(vv&&vv.srcObject){try{vv.srcObject.getTracks().forEach(t=>t.stop());}catch(e){}vv.srcObject=null;}const b=$('sc_cambox');if(b)b.classList.add('hidden');const c=$('sc_cam');if(c)c.textContent='📷 Câmera';}
 // contador de leituras por item (para saber o que foi digitado à mão)
 const lidos={};function zerarLidos(){Object.keys(lidos).forEach(k=>delete lidos[k]);}
 
@@ -540,12 +562,13 @@ function abaProdutos(){
 function modalNovoProduto(){
   abrir(`<h2>Cadastrar produto</h2><div class="sub">Cadastre os códigos para conferir por leitor de código de barras.</div>
   <div class="campo"><label>Nome do produto</label><input id="np_n"></div>
+  ${scanHtml('Bipe ou toque em 📷 Câmera para ler o código de barras')}
   <div class="duas"><div class="campo"><label>SKU</label><input id="np_s"></div><div class="campo"><label>Variação (cor, tamanho, sabor…)</label><input id="np_v"></div></div>
   <div class="duas"><div class="campo"><label>EAN</label><input id="np_e" inputmode="numeric"></div><div class="campo"><label>UPC</label><input id="np_u" inputmode="numeric"></div></div>
   <div class="duas"><div class="campo"><label>Código da caixa <span style="font-weight:400;color:var(--mut)">(se houver)</span></label><input id="np_cx"></div><div class="campo"><label>Unidades por caixa</label><input id="np_ucx" inputmode="numeric"></div></div>
   <div class="campo"><label>Foto <span style="font-weight:400;color:var(--mut)">(opcional)</span></label><input id="np_f" type="file" accept="image/*"></div>
   <div class="erro"></div><div class="rodape"><button id="cx">Cancelar</button><button id="mais">Salvar e cadastrar outro</button><button class="primary" id="ok">Salvar produto</button></div>`);
-  $('cx').onclick=fechar;
+  $('cx').onclick=fechar;ligarScanCodigos('np',null);
   const salvar=(cont,btn)=>{const n=val('np_n'),arq=$('np_f').files[0],er=$('modal').querySelector('.erro');
     if(!n){er.textContent='Informe o nome do produto.';return;}
     rodar(btn,async()=>{const id=await rpc('cadastrar_produto',{p_nome:n,p_sku:val('np_s')});
@@ -555,17 +578,26 @@ function modalNovoProduto(){
       if(cont)modalNovoProduto();else fechar();});};
   $('ok').onclick=()=>salvar(false,$('ok'));$('mais').onclick=()=>salvar(true,$('mais'));
 }
+// preenche EAN/UPC/SKU do cadastro a partir do leitor ou da câmera
+function ligarScanCodigos(pref,pid){
+  const preencher=v=>{v=String(v||'').trim().replace(/\s/g,'');if(!v)return;const r=acharCodigo(v);
+    if(r&&r.p.id!==pid){bip(false);scanMsg('err','✗ O código '+v+' já pertence a '+r.p.nome+'.');return;}
+    const c=/^\d{12}$/.test(v)?'u':(/^\d{13}$/.test(v)||/^\d{8}$/.test(v)||/^\d{14}$/.test(v))?'e':'s';
+    const el=$(pref+'_'+c);if(!el)return;el.value=v;el.classList.add('lido');setTimeout(()=>el.classList.remove('lido'),1200);
+    bip(true);scanMsg('ok','✓ Código '+v+' preenchido no campo '+{u:'UPC',e:'EAN',s:'SKU'}[c]+'.');};
+  const inp=$('sc_in');if(!inp)return;
+  inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();const v=inp.value;inp.value='';preencher(v);}});
+  scanMsg('','Leitor pronto · bipe o produto ou use a câmera do celular.');
+  const cb=$('sc_cam');if(cb)cb.onclick=()=>abrirCamera(preencher,true);}
 function modalCodigos(pid){const p=D.produtos.find(x=>x.id===pid);
   abrir(`<h2>Códigos — ${esc(p.nome)}</h2><div class="sub">Usados pelo leitor. UPC de 12 dígitos e EAN de 13 dígitos com zero na frente são reconhecidos como o mesmo código.</div>
   <div class="campo"><label>Nome</label><input id="cd_n" value="${esc(p.nome)}"></div>
   <div class="duas"><div class="campo"><label>SKU</label><input id="cd_s" value="${esc(p.sku||'')}"></div><div class="campo"><label>Variação</label><input id="cd_v" value="${esc(p.variacao||'')}"></div></div>
   <div class="duas"><div class="campo"><label>EAN</label><input id="cd_e" value="${esc(p.ean||'')}"></div><div class="campo"><label>UPC</label><input id="cd_u" value="${esc(p.upc||'')}"></div></div>
   <div class="duas"><div class="campo"><label>Código da caixa</label><input id="cd_cx" value="${esc(p.codigo_caixa||'')}"></div><div class="campo"><label>Unidades por caixa</label><input id="cd_ucx" inputmode="numeric" value="${p.un_por_caixa||''}"></div></div>
-  ${scanHtml('Bipe aqui para preencher o EAN/UPC')}
+  ${scanHtml('Bipe ou toque em 📷 Câmera para ler o código de barras')}
   <div class="erro"></div><div class="rodape"><button id="cx">Voltar</button><button class="primary" id="ok">Salvar</button></div>`);
-  const inp=$('sc_in');inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();const v=inp.value.trim();inp.value='';if(!v)return;const r=acharCodigo(v);
-    if(r&&r.p.id!==pid){bip(false);$('sc_msg').textContent='Este código já pertence a '+r.p.nome;return;}
-    if(/^\d{12}$/.test(v))$('cd_u').value=v;else if(/^\d{13}$/.test(v)||/^\d{8}$/.test(v))$('cd_e').value=v;else $('cd_s').value=v;bip(true);$('sc_msg').textContent='Código '+v+' preenchido.';}});
+  ligarScanCodigos('cd',pid);
   $('cx').onclick=()=>modalProduto(pid);
   $('ok').onclick=()=>rodar($('ok'),async()=>{if(val('cd_n')!==p.nome||val('cd_s')!==(p.sku||''))await rpc('editar_produto',{p_produto:pid,p_nome:val('cd_n'),p_sku:val('cd_s')});
     await rpc('salvar_codigos_produto',{p_produto:pid,p_sku:val('cd_s'),p_ean:val('cd_e'),p_upc:val('cd_u'),p_variacao:val('cd_v'),p_codigo_caixa:val('cd_cx'),p_un_caixa:val('cd_ucx')?num(val('cd_ucx')):null});
