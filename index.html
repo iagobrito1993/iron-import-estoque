@@ -319,7 +319,7 @@ sb.auth.onAuthStateChange((ev,s)=>{
   if(ev==='SIGNED_OUT'){sessao=null;perfil=null;aba=null;modoLogin='entrar';setTimeout(()=>telaLogin(),0);}
   if(s)sessao=s;
 });
-async function iniciar(){const {data:{session}}=await sb.auth.getSession();sessao=session;if(!sessao)return telaLogin();await carregarPerfil();}
+async function iniciar(){atualizarCotacao().then(c=>{if(c&&typeof aba!=='undefined'&&aba==='painel'&&document.querySelector('[data-aba]'))render();});setInterval(()=>atualizarCotacao(),30*60*1000);const {data:{session}}=await sb.auth.getSession();sessao=session;if(!sessao)return telaLogin();await carregarPerfil();}
 async function carregarPerfil(){
   const {data,error}=await sb.from('perfis').select('*').eq('user_id',sessao.user.id).maybeSingle();
   if(error){$('app').innerHTML=`<div class="login"><div class="logobox">${logoHtml()}</div><p class="erro">Não foi possível carregar seu acesso. Tente recarregar a página.</p></div>`;return;}
@@ -370,7 +370,17 @@ function custoP(p){return um(p.produtos_custo)||{qtd_eua:0,qtd_reservada_eua:0,c
 function moeda(v,m,dec=2){m=m||'BRL';if(m==='BRL')return brl(v,dec);if(m==='USD')return usd(v,dec);return m+' '+Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:dec});}
 function barra(p){p=Math.max(0,Math.min(100,+p||0));return `<div class="prog"><span style="width:${p}%"></span></div>`;}
 function bdg(map,s){const x=map[s]||[s,'b-can'];return `<span class="badge ${x[1]}">${x[0]}</span>`;}
-function cotDolar(){const u=lerPref('iron_cotacao','');if(u)return u;const c=(D.compras||[]).find(e=>+e.cotacao>0);return c?String(+c.cotacao).replace('.',','):'5,40';}
+// cotação automática do dólar comercial (AwesomeAPI, com reserva na open.er-api) — renovada a cada 30 min
+let COT=null;try{COT=JSON.parse(localStorage.getItem('iron_cot_auto')||'null');}catch(e){}
+async function atualizarCotacao(forcar){
+  if(!forcar&&COT&&Date.now()-COT.t<30*60*1000)return COT;
+  const tenta=async(u,f)=>{const c=new AbortController();const tm=setTimeout(()=>c.abort(),6000);try{const r=await fetch(u,{signal:c.signal,cache:'no-store'});return f(await r.json());}finally{clearTimeout(tm);}};
+  let v=null,fonte='';
+  try{v=await tenta('https://economia.awesomeapi.com.br/json/last/USD-BRL',j=>+j.USDBRL.bid);fonte='AwesomeAPI';}catch(e){}
+  if(!(v>0)){try{v=await tenta('https://open.er-api.com/v6/latest/USD',j=>+j.rates.BRL);fonte='ExchangeRate-API';}catch(e){}}
+  if(v>0){COT={v:+v.toFixed(4),t:Date.now(),fonte};try{localStorage.setItem('iron_cot_auto',JSON.stringify(COT));}catch(e){}}
+  return COT;}
+function cotDolar(){if(COT&&COT.v>0&&new Date(COT.t).toDateString()===new Date().toDateString())return String(COT.v).replace('.',',');const u=lerPref('iron_cotacao','');if(u)return u;const c=(D.compras||[]).find(e=>+e.cotacao>0);return c?String(+c.cotacao).replace('.',','):'5,40';}
 function numBR(v){return v==null||v===''?'':String(+v).replace('.',',');}
 function eu(){return perfil?(perfil.nome||perfil.email):'';}
 function chip(sel,k,l,attr){return `<button class="${sel===k?'on':''}" data-${attr}="${k}">${l}</button>`;}
@@ -529,7 +539,8 @@ function abaPainel(){
   let apo='';
   if(tem('ver_aportes')){const t=totaisParticipantes();
     apo=`<h3>Aportes por participante</h3><div class="resumo">${t.length?t.map(x=>kpi(Object.entries(x.ap).map(([m,v])=>moeda(v,m)).join(' + ')||'—',esc(x.nome)+' · aportes de capital','aportes')).join(''):kpi('—','Nenhum aporte lançado','aportes')}</div>`;}
-  return `<div class="resumo" style="margin-top:12px">
+  const cotKpi=COT&&COT.v>0?kpi('R$ '+String(COT.v.toFixed(4)).replace('.',','),'Dólar comercial · '+new Date(COT.t).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+' · '+COT.fonte):'';
+  return `<div class="resumo" style="margin-top:12px">${cotKpi}
     ${kpi(un(peds.filter(p=>p.status==='pendente').length)+' / '+un(peds.filter(p=>p.status==='parcial').length),'Compras pendentes / parcialmente recebidas','receb')}
     ${kpi(un(pendUn),'Unidades compradas a receber','receb')}
     ${kpi(un(dv.length),'Divergências pendentes','diverg')}</div>
@@ -542,8 +553,8 @@ function abaPainel(){
   ${fin}${apo}
   <h3>Situação do sistema</h3><div class="total">
    <b>Funcionando com dados reais:</b> compras, recebimento fracionado, estoque EUA com reserva, remessas DHL/Aladin com caixas, alfândega, conferência no warehouse, envio ao Full, divergências, gastos, aportes, anexos, leitor de código de barras (USB/Bluetooth) e histórico de alterações.<br>
-   <b>Integrações pendentes:</b> rastreio automático DHL/Aladin (hoje o código é digitado); confirmação automática do recebimento no Full pelo Mercado Livre/Amazon (hoje é registrada à mão);
-   ${window.isSecureContext?'':'leitura pela câmera do celular (precisa do site em HTTPS); '}cotação do dólar automática (hoje é informada).<br>
+   <b>Automático:</b> cotação do dólar comercial (atualizada a cada 30 min, pode ser alterada em cada lançamento) · link direto de rastreio DHL/Aladin · leitura do código de barras pela câmera do celular.<br>
+   <b>Integrações pendentes:</b> atualização automática do status da remessa pela API da DHL (precisa da chave de API da DHL) · confirmação automática do recebimento no Full pela API do Mercado Livre/Amazon (precisa de um aplicativo cadastrado no Mercado Livre).<br>
    <b>Dados demonstrativos:</b> nenhum — tudo o que aparece aqui foi lançado no sistema.</div>`;
 }
 
@@ -944,9 +955,12 @@ function passos(r){if(r.status==='cancelado')return '';
   const o=[['preparacao','Preparação'],['transito','Trânsito internacional'],['alf','Alfândega'],['liberada','Liberada'],['parcial','Warehouse'],['recebido','Recebida']];
   const ordem={preparacao:0,transito:1,alfandega:2,fiscalizacao:2,aguardando_doc:2,aguardando_pag:2,retida:2,liberada:3,parcial:4,recebido:5}[r.status]??1;
   return `<div class="passos">${o.map(([k,n],i)=>`<span class="${i<ordem||(i===ordem&&r.status==='recebido')?'f':i===ordem?'a':''}">${i===2&&ordem===2?(ST_REM[r.status]||[n])[0]:n}</span>`).join('')}</div>`;}
+function urlRastreio(r){const c=encodeURIComponent(String(r.rastreio||'').trim());if(!c)return '';
+  return /dhl/i.test(r.transportadora)?'https://www.dhl.com/br-pt/home/rastreamento.html?tracking-id='+c+'&submit=1':'https://t.17track.net/pt#nums='+c;}
+function linkRastreio(r){const u=urlRastreio(r);return u?`<a href="${u}" target="_blank" rel="noopener" onclick="event.stopPropagation()"><b>${esc(r.rastreio)}</b> ↗</a>`:'';}
 function cardRemessa(r,botao){const t=totRem(r),c=um(r.envios_custo);
   return `<div class="card click" data-env="${r.id}"><div><div class="t">Remessa #${r.id} · ${esc(r.transportadora)} ${bdg(ST_REM,r.status)}</div>
-   <div class="meta">${esc(r.origem||'EUA')} → ${esc(r.destino||'Brasil')} · ${r.status==='preparacao'?'saída prevista':'saída'} ${fd(r.data_saida)}${r.previsao?' · chegada prevista '+fd(r.previsao):''}${r.rastreio?' · rastreio <b>'+esc(r.rastreio)+'</b>':''}${r.caixas?' · '+un(r.caixas)+' volume(s)':''}${r.peso_kg?' · '+numBR(r.peso_kg)+' kg':''}</div>${passos(r)}
+   <div class="meta">${esc(r.origem||'EUA')} → ${esc(r.destino||'Brasil')} · ${r.status==='preparacao'?'saída prevista':'saída'} ${fd(r.data_saida)}${r.previsao?' · chegada prevista '+fd(r.previsao):''}${r.rastreio?' · rastreio '+linkRastreio(r):''}${r.caixas?' · '+un(r.caixas)+' volume(s)':''}${r.peso_kg?' · '+numBR(r.peso_kg)+' kg':''}</div>${passos(r)}
    ${['parcial','recebido'].includes(r.status)?`<div class="meta">Conferido no warehouse <b>${un(t.rec)}</b> de ${un(t.env)}${t.pend?' · pendente '+un(t.pend):''}${t.div?' · <b>'+un(t.div)+' em divergência</b>':''}</div>`:''}
    ${r.status==='recebido'&&r.encerrado_motivo?'<div class="warn">Encerrada com falta: '+esc(r.encerrado_motivo)+'</div>':''}
    ${c&&verCusto()&&['parcial','recebido'].includes(r.status)&&!c.custos_lancados?'<div class="warn">⚠ Preço de custo a lançar</div>':''}</div>
@@ -1040,7 +1054,7 @@ function modalDetalhe(id){log('abriu','Remessa #'+id);
   const chs=D.chegadas.filter(x=>x.envio_id===id).sort((a,b)=>a.id-b.id);
   const dvs=D.divergencias.filter(d=>it.some(i=>i.id===d.envio_item_id));
   abrir(`<h2>Remessa #${r.id} · ${esc(r.transportadora)} ${bdg(ST_REM,r.status)}</h2>
-  <div class="sub">${esc(r.origem||'EUA')} → ${esc(r.destino||'Brasil')} · ${r.status==='preparacao'?'envio previsto':'saída'} ${fd(r.data_saida)}${r.previsao?' · chegada prevista '+fd(r.previsao):''}${r.rastreio?' · rastreio <b>'+esc(r.rastreio)+'</b>':' · <b>sem rastreio</b>'} · ${un(t.env)} un.${r.responsavel?' · responsável '+esc(r.responsavel):''}${nomeDe(r.criado_por)?' · criada por '+esc(nomeDe(r.criado_por)):''}
+  <div class="sub">${esc(r.origem||'EUA')} → ${esc(r.destino||'Brasil')} · ${r.status==='preparacao'?'envio previsto':'saída'} ${fd(r.data_saida)}${r.previsao?' · chegada prevista '+fd(r.previsao):''}${r.rastreio?' · rastreio '+linkRastreio(r):' · <b>sem rastreio</b>'} · ${un(t.env)} un.${r.responsavel?' · responsável '+esc(r.responsavel):''}${nomeDe(r.criado_por)?' · criada por '+esc(nomeDe(r.criado_por)):''}
   ${r.saida_em?'<br>Saída confirmada '+fts(r.saida_em)+' por '+esc(nomeDe(r.saida_por)):''}${r.obs?'<br>Obs.: '+esc(r.obs):''}${r.encerrado_motivo?'<br>'+(r.status==='cancelado'?'Cancelada':'Encerrada')+': '+esc(r.encerrado_motivo):''}</div>${passos(r)}
   ${verCusto()?`<div class="total">Despesas da remessa: frete ${moeda(r.frete_transp,r.moeda_despesas)} · seguro ${moeda(r.seguro,r.moeda_despesas)} · demais ${moeda(r.despesas,r.moeda_despesas)}${alf.some(a=>+a.imposto+ +a.taxas>0)?' · alfândega: impostos '+brl(alf.reduce((s,a)=>s+ +a.imposto,0))+' + taxas '+brl(alf.reduce((s,a)=>s+ +a.taxas,0)):''}
    ${c?`<br>Rateio no custo: ${c.custos_lancados||+c.frete||+c.imposto?`frete <b>${brl(c.frete)}</b> · imposto <b>${brl(c.imposto)}</b>${c.cotacao?' · dólar '+numBR(c.cotacao):''}`:'ainda não lançado'}${podeCusto()&&r.status!=='cancelado'?` · <button class="link" id="custos">${c.custos_lancados?'Alterar preço de custo':'Lançar preço de custo'}</button>`:''}`:''}</div>`:''}
