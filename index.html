@@ -180,6 +180,14 @@ const sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 const PAPEIS={admin:'Administrador',eua:'EUA (compras)',brasil:'Brasil (depósito)',socio:'Sócio (só visualização)'};
 const ST_REM={preparacao:['Em preparação','b-prep'],transito:['Em trânsito internacional','b-rota'],alfandega:['Em fiscalização','b-alf'],fiscalizacao:['Em fiscalização','b-alf'],aguardando_doc:['Aguardando documentação','b-alf'],aguardando_pag:['Aguardando pagamento','b-alf'],liberada:['Liberada pela alfândega','b-lib'],retida:['Retida / ocorrência','b-ret'],parcial:['Recebida parcialmente','b-par'],recebido:['Recebida no warehouse','b-rec'],cancelado:['Cancelada','b-can']};
 const STATUS=ST_REM;
+const ETAPAS=[['aladin','Aladin EUA → Paraguai'],['paraguai','Chegou no Paraguai'],['freteiro','Travessia com freteiro'],['transporte_sp','Transporte até São Paulo']];
+const ETAPA_NOME=Object.fromEntries(ETAPAS);
+const ETAPA_CURTA={aladin:'Aladin → Paraguai',paraguai:'No Paraguai',freteiro:'Com freteiro',transporte_sp:'Indo para SP'};
+const ETAPA_RESP={aladin:'Agente / responsável Aladin',paraguai:'Quem recebeu no Paraguai',freteiro:'Nome do freteiro',transporte_sp:'Transportadora / motorista'};
+function rotaPY(r){return r&&r.rota==='paraguai';}
+function etapaDe(r){return rotaPY(r)&&aCaminho(r.status)?(r.etapa||'aladin'):null;}
+function etapasDe(r){return (r.remessa_etapas||[]).slice().sort((a,b)=>String(a.data).localeCompare(String(b.data))||a.id-b.id);}
+function custoEtapasBRL(r){const cot=dinheiro(cotDolar())||0;return etapasDe(r).reduce((s,e)=>s+(+e.valor||0)*(e.moeda==='USD'?cot:1),0);}
 const EM_TRANSITO=['transito','alfandega','fiscalizacao','aguardando_doc','aguardando_pag','liberada','retida'];
 const NA_ALF=['alfandega','fiscalizacao','aguardando_doc','aguardando_pag','retida'];
 const ALF_OPC=[['transito','Em trânsito internacional'],['fiscalizacao','Em fiscalização'],['aguardando_doc','Aguardando documentação'],['aguardando_pag','Aguardando pagamento'],['liberada','Liberada'],['retida','Retida ou com ocorrência']];
@@ -191,8 +199,9 @@ const CATS=['Ajudantes e mão de obra','Aluguel','Embalagens','Transporte e entr
 const MOEDAS=['USD','BRL','EUR','PYG'];
 const MARKETS=['Mercado Livre','Amazon','Outro'];
 const TIPOS_MOV={aporte:'Aporte de capital',emprestimo:'Empréstimo do participante',despesa_paga:'Despesa paga em nome da empresa',reembolso:'Reembolso ao participante',retirada:'Retirada'};
-const PERM_PAPEL={eua:['produtos','compras','receber_compras','remessas','alfandega','ver_custos'],brasil:['alfandega','warehouse','full'],socio:['ver_custos','ver_financeiro','ver_aportes']};
-const PERMS={produtos:'Produtos e códigos',compras:'Lançar compras',receber_compras:'Receber compras',remessas:'Remessas DHL/Aladin',alfandega:'Alfândega',warehouse:'Conferência no warehouse',full:'Envios ao Full',ver_custos:'Ver custos',ver_financeiro:'Ver gastos',editar_financeiro:'Lançar gastos',ver_aportes:'Ver aportes',editar_aportes:'Lançar aportes'};
+const PERM_PAPEL={eua:['produtos','compras','receber_compras','remessas','alfandega'],brasil:['alfandega','warehouse','full'],socio:[]};
+const SO_ADMIN=['ver_custos','ver_financeiro','editar_financeiro','ver_aportes','editar_aportes'];
+const PERMS={produtos:'Produtos e códigos',compras:'Lançar compras',receber_compras:'Receber compras',remessas:'Remessas DHL/Aladin',alfandega:'Alfândega',warehouse:'Conferência no warehouse',full:'Envios ao Full'};
 let sessao=null,perfil=null,aba=null,busca='',D={produtos:[],envios:[],compras:[],perfis:[],acessos:[],warehouses:[],participantes:[],contas:[],divergencias:[],chegadas:[],entradas:[],full:[],anexos:[],ajustes:[],pedidos:[],recebimentos:[],lancamentos:[],movimentos:[]},modoLogin='entrar',carregando=false;
 
 // ---------- utilidades ----------
@@ -210,9 +219,9 @@ function um(x){return Array.isArray(x)?x[0]||null:x||null;}
 function val(id){const e=$(id);return e?e.value.trim():'';}
 function toast(m){const t=$('toast');t.textContent=m;t.classList.remove('hidden');clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.add('hidden'),3000);}
 function papel(){return perfil&&perfil.papel;}
-function tem(p){if(!perfil||!perfil.papel)return false;if(perfil.papel==='admin')return true;return (perfil.perms||[]).includes(p)||(PERM_PAPEL[perfil.papel]||[]).includes(p);}
-function podeCusto(){return papel()!=='socio'&&tem('ver_custos')&&(tem('compras')||tem('remessas'));}
-function verCusto(){return tem('ver_custos');}
+function tem(p){if(!perfil||!perfil.papel)return false;if(perfil.papel==='admin')return true;if(SO_ADMIN.includes(p))return false;return (perfil.perms||[]).includes(p)||(PERM_PAPEL[perfil.papel]||[]).includes(p);}
+function podeCusto(){return ehAdmin();}
+function verCusto(){return ehAdmin();}
 function podeBR(){return ['admin','brasil'].includes(papel());}
 function podeAlf(){return ['admin','eua','brasil'].includes(papel());}
 function ehAdmin(){return papel()==='admin';}
@@ -255,7 +264,7 @@ function msgErro(e){const m=(e&&(e.message||e.error_description))||'Erro inesper
   return m;}
 const NOMES_ACAO={registrar_compra:'Registrou compra nos EUA',excluir_compra:'Excluiu compra',criar_envio:'Criou envio para o Brasil',atualizar_custos_envio:'Alterou frete/imposto de envio',marcar_alfandega:'Marcou envio na alfândega',cancelar_envio:'Cancelou envio',confirmar_chegada:'Confirmou chegada no Brasil',desfazer_chegada:'Desfez chegada',encaminhar:'Encaminhou mercadoria',desfazer_encaminhamento:'Desfez encaminhamento',definir_papel:'Alterou acesso de usuário',definir_foto:'Anexou/alterou foto de produto',editar_produto:'Editou produto',cadastrar_produto:'Cadastrou produto',lancar_custos_entrada:'Lançou preço de custo de envio',lancar_custo_produto:'Lançou preço de custo do produto',
   registrar_pedido:'Registrou compra',editar_pedido:'Editou compra',cancelar_pedido:'Cancelou compra',encerrar_pedido:'Encerrou compra com falta',receber_compra:'Recebeu entrega de compra',estornar_recebimento:'Estornou recebimento',
-  ajustar_estoque_eua:'Ajustou estoque EUA',criar_remessa:'Criou remessa',atualizar_remessa:'Editou remessa',confirmar_saida_remessa:'Confirmou saída da remessa',cancelar_remessa:'Cancelou remessa',atualizar_alfandega:'Atualizou alfândega',
+  ajustar_estoque_eua:'Ajustou estoque EUA',criar_remessa:'Criou remessa',registrar_etapa:'Lançou etapa da remessa (rota Paraguai)',definir_rota:'Alterou a rota da remessa',excluir_etapa:'Excluiu etapa da remessa',atualizar_remessa:'Editou remessa',confirmar_saida_remessa:'Confirmou saída da remessa',cancelar_remessa:'Cancelou remessa',atualizar_alfandega:'Atualizou alfândega',
   receber_remessa:'Conferiu remessa no warehouse',estornar_chegada:'Estornou conferência',encerrar_remessa:'Encerrou remessa com falta',criar_envio_full:'Criou envio Full',conferir_envio_full:'Conferiu envio Full',confirmar_saida_full:'Confirmou saída para o Full',
   cancelar_envio_full:'Cancelou envio Full',receber_full:'Registrou recebimento no Full',resolver_divergencia:'Resolveu divergência',salvar_lancamento:'Salvou gasto',cancelar_lancamento:'Cancelou gasto',salvar_movimento_participante:'Lançou movimentação de participante',
   cancelar_movimento_participante:'Cancelou movimentação de participante',definir_permissoes:'Alterou permissões',salvar_cadastro:'Salvou cadastro',salvar_codigos_produto:'Alterou códigos de produto'};
@@ -331,18 +340,31 @@ async function carregarPerfil(){
 
 // ---------- dados ----------
 function uuid(){const b=new Uint8Array(16);crypto.getRandomValues(b);b[6]=(b[6]&15)|64;b[8]=(b[8]&63)|128;const h=[...b].map(x=>x.toString(16).padStart(2,'0')).join('');return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;}
+// colunas liberadas para todos — valores (custos, fretes, impostos, pagamentos) chegam só para o admin via dados_sigilosos()
+const C_ENV='id,transportadora,rastreio,caixas,peso_kg,data_saida,status,data_alfandega,obs_alfandega,data_chegada,obs_chegada,obs,criado_por,recebido_por,criado_em,origem,destino,previsao,moeda_despesas,responsavel,chave,saida_em,saida_por,warehouse_id,status_transito,encerrado_motivo,rota,etapa';
+const C_ETAPA='id,envio_id,etapa,data,responsavel,telefone,rastreio,volumes,moeda,obs,criado_por,criado_em';
+const C_ALF='id,envio_id,status,data,documentos,moeda,obs,criado_por,criado_em';
+const C_FULL='id,chave,warehouse_id,marketplace,conta,empresa,cd_destino,identificador,volumes,etiquetas,responsavel,data_saida,transporte,moeda,status,obs,conferido_por,conferido_em,saida_por,saida_em,encerrado_motivo,criado_por,criado_em';
+const C_PED='id,chave,fornecedor,numero,data,previsao,responsavel,moeda,obs,status,perc_recebido,motivo_status,criado_por,criado_em,atualizado_por,atualizado_em';
+const C_PEDI='id,pedido_id,produto_id,variacao,embalagem,un_por_emb,qtd,qtd_aprovada,qtd_divergencia,qtd_baixada';
+function mesclarSigilosos(N,S){if(!S)return;const idx=(a,k='id')=>{const m={};(a||[]).forEach(x=>m[x[k]]=x);return m;};
+  const pc=idx(S.produtos_custo,'produto_id'),pe=idx(S.pedidos),pi=idx(S.pedido_itens),en=idx(S.envios),al=idx(S.alfandega_eventos),fu=idx(S.envios_full),et=idx(S.remessa_etapas);
+  (N.produtos||[]).forEach(p=>{const c=p.produtos_custo;if(!c)return;(Array.isArray(c)?c:[c]).forEach(x=>Object.assign(x,pc[p.id]||{}));});
+  (N.pedidos||[]).forEach(p=>{Object.assign(p,pe[p.id]||{});(p.pedido_itens||[]).forEach(i=>Object.assign(i,pi[i.id]||{}));});
+  (N.envios||[]).forEach(r=>{Object.assign(r,en[r.id]||{});(r.alfandega_eventos||[]).forEach(a=>Object.assign(a,al[a.id]||{}));(r.remessa_etapas||[]).forEach(e=>Object.assign(e,et[e.id]||{}));});
+  (N.full||[]).forEach(f=>Object.assign(f,fu[f.id]||{}));}
 function sel(t,q,o={}){let r=sb.from(t).select(q||'*').order(o.c||'id',{ascending:!!o.asc});return r.limit(o.lim||3000);}
 async function carregar(){
   if(carregando)return;carregando=true;
   try{
-    const envSel='*, envios_custo(frete,imposto,frete_unit,cotacao,custos_lancados), remessa_volumes(*), alfandega_eventos(*), envio_itens(id,produto_id,qtd_enviada,qtd_recebida,qtd_divergencia,qtd_baixada, remessa_lotes(qtd,compra_id), envio_itens_custo(custo_medio_saida,custo_usd_saida,frete_unit,imposto_unit,custo_br,do_estoque_eua), encaminhamentos(id,qtd,destino,conta,envio,data,obs,criado_por,criado_em))';
-    const R={produtos:sb.from('produtos').select('id,nome,sku,ean,upc,variacao,codigo_caixa,un_por_caixa,foto_url,produtos_custo(qtd_eua,qtd_reservada_eua,custo_medio,custo_medio_usd)').order('nome'),
+    const envSel=C_ENV+', remessa_etapas('+C_ETAPA+'), envios_custo(frete,imposto,frete_unit,cotacao,custos_lancados), remessa_volumes(*), alfandega_eventos('+C_ALF+'), envio_itens(id,produto_id,qtd_enviada,qtd_recebida,qtd_divergencia,qtd_baixada, remessa_lotes(qtd,compra_id), envio_itens_custo(custo_medio_saida,custo_usd_saida,frete_unit,imposto_unit,custo_br,do_estoque_eua), encaminhamentos(id,qtd,destino,conta,envio,data,obs,criado_por,criado_em))';
+    const R={produtos:sb.from('produtos').select('id,nome,sku,ean,upc,variacao,codigo_caixa,un_por_caixa,foto_url,produtos_custo(qtd_eua,qtd_reservada_eua)').order('nome'),
       envios:sel('envios',envSel,{lim:600}),perfis:sb.from('perfis').select('*').order('nome'),
       warehouses:sel('warehouses','*',{asc:true}),participantes:sel('participantes','*',{c:'nome',asc:true}),contas:sel('contas','*',{c:'nome',asc:true}),
       divergencias:sel('divergencias'),chegadas:sel('chegadas','*, chegada_itens(*)',{lim:1500}),entradas:sel('entradas_br','*',{asc:true,lim:5000}),
-      full:sel('envios_full','*, envio_full_itens(*, envio_full_lotes(qtd,entrada_br_id)), full_recebimentos(*, full_receb_itens(*))',{lim:800}),anexos:sel('anexos','*',{lim:5000}),
+      full:sel('envios_full',C_FULL+', envio_full_itens(*, envio_full_lotes(qtd,entrada_br_id)), full_recebimentos(*, full_receb_itens(*))',{lim:800}),anexos:sel('anexos','*',{lim:5000}),
       ajustes:sel('ajustes_estoque','*',{lim:500})};
-    if(tem('compras')||tem('receber_compras')||verCusto()){R.pedidos=sel('pedidos','*, pedido_itens(*)',{lim:1500});R.recebimentos=sel('recebimentos','*, recebimento_itens(*)',{lim:3000});}
+    if(tem('compras')||tem('receber_compras')||verCusto()){R.pedidos=sel('pedidos',C_PED+', pedido_itens('+C_PEDI+')',{lim:1500});R.recebimentos=sel('recebimentos','*, recebimento_itens(*)',{lim:3000});}
     if(verCusto())R.compras=sel('compras','*',{lim:3000});
     if(tem('ver_financeiro'))R.lancamentos=sel('lancamentos','*',{c:'data',lim:3000});
     if(tem('ver_aportes'))R.movimentos=sel('movimentos_participantes','*',{c:'data',lim:3000});
@@ -351,6 +373,7 @@ async function carregar(){
     const e=rs.find(x=>x.error);if(e)throw e.error;
     const N={pedidos:[],recebimentos:[],compras:[],lancamentos:[],movimentos:[],acessos:[]};
     ks.forEach((k,i)=>N[k]=rs[i].data||[]);
+    if(ehAdmin())mesclarSigilosos(N,await rpc('dados_sigilosos',{}));
     Object.assign(D,N);
   }catch(e){console.error(e);toast('Não foi possível atualizar os dados: '+msgErro(e));}
   carregando=false;render();
@@ -395,6 +418,7 @@ function emTransitoInt(pid){let t=0,a=0;D.envios.forEach(r=>{if(!aCaminho(r.stat
 function fullPend(i){return Math.max(i.qtd-i.qtd_recebida-i.qtd_divergencia-i.qtd_baixada-i.qtd_devolvida,0);}
 function transitoFull(pid){let t=0;D.full.forEach(f=>{if(!['enviado','parcial','divergencia'].includes(f.status))return;(f.envio_full_itens||[]).forEach(i=>{if(pid==null||i.produto_id===pid)t+=fullPend(i);});});return t;}
 function noFull(pid){let t=0;D.full.forEach(f=>(f.envio_full_itens||[]).forEach(i=>{if(pid==null||i.produto_id===pid)t+=i.qtd_recebida;}));return t;}
+function porEtapa(){const m={};D.envios.forEach(r=>{if(!aCaminho(r.status)||NA_ALF.includes(r.status))return;const k=etapaDe(r)||'direta';m[k]=(m[k]||0)+itensEnv(r).reduce((s,i)=>s+i.pend,0);});return m;}
 function divAbertas(){return D.divergencias.filter(d=>d.status==='aberta');}
 function pedPend(i){return Math.max(i.qtd-i.qtd_aprovada-i.qtd_divergencia-i.qtd_baixada,0);}
 
@@ -496,9 +520,8 @@ function abasDoPapel(){
   const a=[['painel','Painel'],['produtos','Produtos']];
   if(tem('compras')||verCusto())a.push(['compras','Compras']);
   if(tem('receber_compras')||tem('compras'))a.push(['receb','Recebimento']);
-  if(verCusto()||tem('remessas'))a.push(['eua','Estoque EUA']);
-  a.push(['remessas','DHL / Aladin']);a.push(['brasil','Warehouse Brasil']);a.push(['full','Full']);
-  a.push(['diverg','Divergências'+(divAbertas().length?' ('+divAbertas().length+')':'')]);
+  a.push(['eua','Estoque EUA']);
+  a.push(['remessas','Remessas']);a.push(['brasil','Warehouse Brasil']);a.push(['full','Full']);
   if(tem('ver_financeiro'))a.push(['gastos','Gastos']);
   if(tem('ver_aportes'))a.push(['aportes','Aportes']);
   if(ehAdmin()){a.push(['usuarios','Usuários']);a.push(['cadastros','Cadastros']);a.push(['acessos','Acessos']);}
@@ -509,7 +532,7 @@ function render(){
   const abas=abasDoPapel();if(!abas.find(x=>x[0]===aba))aba=abas[0][0];
   const conteudo={painel:abaPainel,produtos:abaProdutos,compras:abaCompras,receb:abaReceb,eua:abaEUA,remessas:abaRemessas,brasil:abaBrasil,full:abaFull,diverg:abaDiverg,gastos:abaGastos,aportes:abaAportes,usuarios:abaUsuarios,cadastros:abaCadastros,acessos:abaAcessos}[aba]();
   const ativo=document.activeElement&&document.activeElement.id==='busca';const pos=ativo?document.activeElement.selectionStart:0;
-  $('app').innerHTML=`<div class="topo"><div class="wrap"><div class="marca">${logoHtml()}<span class="sep"></span><small>Compra → Recebimento → DHL / Aladin → Alfândega → Warehouse → Full</small></div>
+  $('app').innerHTML=`<div class="topo"><div class="wrap"><div class="marca">${logoHtml()}<span class="sep"></span><small>Compra EUA → Aladin → Paraguai → Freteiro → São Paulo → Warehouse → Full</small></div>
     <div class="quem"><span>${esc(perfil.nome||perfil.email)}</span><span class="badge b-pap">${PAPEIS[perfil.papel]}</span>
     <button class="small" data-act="atualizar">Atualizar</button><button class="small" data-act="sair">Sair</button></div></div></div>
     <div class="wrap"><nav class="abas">${abas.map(([k,l])=>`<button class="${aba===k?'on':''}" data-aba="${k}">${l}</button>`).join('')}</nav>${conteudo}</div>`;
@@ -524,7 +547,7 @@ function abaPainel(){
   const peds=D.pedidos.filter(p=>['pendente','parcial'].includes(p.status));
   const pendUn=peds.reduce((s,p)=>s+(p.pedido_itens||[]).reduce((t,i)=>t+pedPend(i),0),0);
   const eua=D.produtos.reduce((s,p)=>s+custoP(p).qtd_eua,0),euaR=D.produtos.reduce((s,p)=>s+custoP(p).qtd_reservada_eua,0);
-  const ti=emTransitoInt(null),br=estoqueBR();
+  const ti=emTransitoInt(null),br=estoqueBR(),pe=porEtapa();
   const alf=D.envios.filter(r=>NA_ALF.includes(r.status));
   const tf=transitoFull(null),nf=noFull(null),dv=divAbertas();
   const porWh=D.warehouses.map(w=>({w,l:br.filter(x=>x.wh===w.id).reduce((s,x)=>s+x.livre,0),r:br.filter(x=>x.wh===w.id).reduce((s,x)=>s+x.reserv,0)}));
@@ -543,16 +566,19 @@ function abaPainel(){
   return `<div class="resumo" style="margin-top:12px">${cotKpi}
     ${kpi(un(peds.filter(p=>p.status==='pendente').length)+' / '+un(peds.filter(p=>p.status==='parcial').length),'Compras pendentes / parcialmente recebidas','receb')}
     ${kpi(un(pendUn),'Unidades compradas a receber','receb')}
-    ${kpi(un(dv.length),'Divergências pendentes','diverg')}</div>
+</div>
   <h3>Estoque por localização</h3><div class="resumo">
     ${kpi(un(eua),'Disponível nos EUA','eua')}${kpi(un(euaR),'Reservado em remessas (EUA)','remessas')}
-    ${kpi(un(ti.t),'Em trânsito internacional','remessas')}${kpi(un(ti.a)+' un. · '+alf.length+' remessa(s)','Na alfândega','remessas')}
+    ${ETAPAS.map(([k])=>kpi(un(pe[k]||0),ETAPA_CURTA[k],'remessas')).join('')}
+    ${pe.direta?kpi(un(pe.direta),'Rota direta (DHL / etiquetas)','remessas'):''}${ti.a?kpi(un(ti.a)+' un. · '+alf.length+' remessa(s)','Na alfândega','remessas'):''}
     ${porWh.map(x=>kpi(un(x.l),'Warehouse '+esc(x.w.nome)+(x.r?' · '+un(x.r)+' reservado':''),'brasil')).join('')}
     ${kpi(un(tf),'Em trânsito para o Full','full')}${kpi(un(nf),'Confirmado no Full','full')}
     ${Object.entries(contas).map(([k,v])=>kpi(un(v),'No Full · '+esc(k),'full')).join('')}</div>
   ${fin}${apo}
   <h3>Situação do sistema</h3><div class="total">
-   <b>Funcionando com dados reais:</b> compras, recebimento fracionado, estoque EUA com reserva, remessas DHL/Aladin com caixas, alfândega, conferência no warehouse, envio ao Full, divergências, gastos, aportes, anexos, leitor de código de barras (USB/Bluetooth) e histórico de alterações.<br>
+   <b>Fluxo:</b> compra nos EUA → estoque EUA → remessa Aladin até o Paraguai → travessia com freteiro → transporte até São Paulo → conferência no Warehouse SP → Full. Remessas DHL / etiquetas avulsas seguem a rota direta.<br>
+   <b>Sigilo:</b> custos, fretes, impostos, pagamentos, gastos, aportes, usuários e acessos aparecem só para o administrador. Os demais perfis veem quantidades, etapas, rastreios e datas.<br>
+   <b>Ocorrências:</b> faltas, avarias e produtos errados são lançados na própria conferência e não entram no estoque.<br>
    <b>Automático:</b> cotação do dólar comercial (atualizada a cada 30 min, pode ser alterada em cada lançamento) · link direto de rastreio DHL/Aladin · leitura do código de barras pela câmera do celular.<br>
    <b>Integrações pendentes:</b> atualização automática do status da remessa pela API da DHL (precisa da chave de API da DHL) · confirmação automática do recebimento no Full pela API do Mercado Livre/Amazon (precisa de um aplicativo cadastrado no Mercado Livre).<br>
    <b>Dados demonstrativos:</b> nenhum — tudo o que aparece aqui foi lançado no sistema.</div>`;
@@ -852,7 +878,7 @@ function modalPedido(id){
       await carregar();toast('Compra #'+nid+' salva como Pendente.'+ax);aba='compras';filtroPed='abertas';render();modalPedidoDet(nid);});};
 }
 function tabelaItensPedido(p,comValor){
-  return `<div class="scroll"><table class="planilha"><tr><th>Produto</th><th class="n">Comprado</th><th class="n">Recebido</th><th class="n">Divergência</th><th class="n">Baixado</th><th class="n">Pendente</th>${comValor?'<th class="n">Valor un.</th><th class="n">Custo final un.</th>':''}</tr>
+  return `<div class="scroll"><table class="planilha"><tr><th>Produto</th><th class="n">Comprado</th><th class="n">Recebido</th><th class="n">Ocorrência</th><th class="n">Baixado</th><th class="n">Pendente</th>${comValor?'<th class="n">Valor un.</th><th class="n">Custo final un.</th>':''}</tr>
   ${(p.pedido_itens||[]).map(i=>`<tr><td>${esc(nomeP(i.produto_id))}${i.variacao?' · '+esc(i.variacao):''}${i.embalagem==='caixa'?' <span class="meta">(cx '+un(i.un_por_emb)+' un.)</span>':''}</td><td class="n">${un(i.qtd)}</td><td class="n"><b>${un(i.qtd_aprovada)}</b></td><td class="n">${i.qtd_divergencia?'<b>'+un(i.qtd_divergencia)+'</b>':'—'}</td><td class="n">${i.qtd_baixada?un(i.qtd_baixada):'—'}</td><td class="n">${un(pedPend(i))}</td>
    ${comValor?`<td class="n">${moeda(i.valor_unit,p.moeda)}</td><td class="n">${moeda(i.custo_unit_final,p.moeda,4)}${p.moeda!=='USD'?'<div class="meta">'+usd(i.custo_usd,4)+'</div>':''}</td>`:''}</tr>`).join('')}</table></div>`;}
 function historicoReceb(pid){const rs=D.recebimentos.filter(r=>r.pedido_id===pid).sort((a,b)=>a.id-b.id);
@@ -864,7 +890,7 @@ function historicoReceb(pid){const rs=D.recebimentos.filter(r=>r.pedido_id===pid
       ${anexosHtml('recebimento',r.id,!r.estornado&&tem('receber_compras'))}</div>
       <div class="dir"><div class="n">+${un(ok)}</div>${av?'<div class="meta">'+un(av)+' separado</div>':''}${!r.estornado&&tem('receber_compras')?`<button class="small" data-estr="${r.id}">Estornar</button>`:''}</div></div></div>`;}).join('');}
 function divergenciasHtml(lst){if(!lst.length)return '';
-  return '<h3>Divergências</h3>'+lst.map(d=>`<div class="item"><div style="display:flex;justify-content:space-between;gap:8px"><div><b>${TIPO_DIV[d.tipo]}</b> · ${esc(nomeP(d.produto_id))} · <b>${un(d.qtd)} un.</b> ${d.status==='aberta'?'<span class="badge b-ret">Aberta</span>':d.status==='resolvida'?'<span class="badge b-rec">'+esc(RES_DIV[d.resolucao]||d.resolucao)+'</span>':'<span class="badge b-can">Cancelada</span>'}
+  return '<h3>Ocorrências</h3>'+lst.map(d=>`<div class="item"><div style="display:flex;justify-content:space-between;gap:8px"><div><b>${TIPO_DIV[d.tipo]}</b> · ${esc(nomeP(d.produto_id))} · <b>${un(d.qtd)} un.</b> ${d.status==='aberta'?'<span class="badge b-ret">Aberta</span>':d.status==='resolvida'?'<span class="badge b-rec">'+esc(RES_DIV[d.resolucao]||d.resolucao)+'</span>':'<span class="badge b-can">Cancelada</span>'}
     <div class="meta">${fts(d.criado_em)} · ${esc(nomeDe(d.criado_por))}${d.obs?' · '+esc(d.obs):''}${d.justificativa?' · '+esc(d.justificativa):''}</div></div>${d.status==='aberta'?`<button class="small primary" data-resdiv="${d.id}">Resolver</button>`:''}</div></div>`).join('');}
 function modalPedidoDet(id){
   const p=pedido(id);if(!p)return;log('abriu','Compra #'+id);reabrir=()=>modalPedidoDet(id);
@@ -882,7 +908,7 @@ function modalPedidoDet(id){
   <div class="erro"></div><div class="rodape">
    ${tem('compras')&&!temRec&&p.status!=='cancelada'?'<button class="danger" id="pc_canc">Cancelar compra</button>':''}
    ${tem('compras')&&p.status==='parcial'?'<button id="pc_enc">Encerrar com falta</button>':''}
-   ${tem('compras')&&!['cancelada','encerrada_falta'].includes(p.status)?'<button id="pc_edt">Editar</button>':''}
+   ${ehAdmin()&&!['cancelada','encerrada_falta'].includes(p.status)?'<button id="pc_edt">Editar</button>':''}
    ${tem('receber_compras')&&['pendente','parcial'].includes(p.status)?'<button class="primary" id="pc_rec">Receber entrega</button>':''}<button id="cx">Fechar</button></div>`);
   $('cx').onclick=fechar;const volta=()=>modalPedidoDet(id);
   if($('pc_rec'))$('pc_rec').onclick=()=>modalReceber(id);
@@ -910,7 +936,7 @@ function abaReceb(){
 function modalReceber(pid){
   const p=pedido(pid);if(!p)return;zerarLidos();reabrir=null;
   const its=(p.pedido_itens||[]);const locais=[...new Set(D.recebimentos.map(r=>r.local).filter(Boolean))];
-  abrir(`<h2>Receber entrega — Compra #${p.id}</h2><div class="sub">${esc(p.fornecedor)}${p.numero?' · nº '+esc(p.numero):''}. Lance só o que chegou nesta entrega. Somente as unidades <b>aprovadas</b> entram no estoque EUA; avariadas e incorretas ficam separadas em Divergências.</div>
+  abrir(`<h2>Receber entrega — Compra #${p.id}</h2><div class="sub">${esc(p.fornecedor)}${p.numero?' · nº '+esc(p.numero):''}. Lance só o que chegou nesta entrega. Somente as unidades <b>aprovadas</b> entram no estoque EUA; avariadas e incorretas ficam registradas como <b>ocorrência</b> e não entram no estoque.</div>
   <div class="tres"><div class="campo"><label>Data do recebimento</label><input id="rc_d" type="date" value="${hoje()}"></div>
    <div class="campo"><label>Responsável</label><input id="rc_r" value="${esc(eu())}"></div>
    <div class="campo"><label>Local de recebimento</label><input id="rc_l" list="dl_loc" value="${esc(locais[0]||'')}" placeholder="ex.: Warehouse Miami"><datalist id="dl_loc">${locais.map(l=>`<option value="${esc(l)}">`).join('')}</datalist></div></div>
@@ -918,7 +944,7 @@ function modalReceber(pid){
   <div class="scroll"><table class="planilha rateio" id="rc_tab"><tr><th>Produto</th><th class="n">Comprado</th><th class="n">Recebido antes</th><th class="n">Pendente</th><th class="n">Aprovado agora</th><th class="n">Avariado</th><th class="n">Incorreto</th><th class="n">Fica pendente</th></tr>
   ${its.map(i=>{const pr=produto(i.produto_id);return `<tr data-it="${i.id}"><td>${esc(pr.nome)}${i.variacao?' · '+esc(i.variacao):''}<div class="meta">${[pr.ean||pr.upc||pr.sku?'Cód. '+esc(pr.ean||pr.upc||pr.sku):'sem código de barras',i.embalagem==='caixa'?'caixa com '+un(i.un_por_emb)+' un.':''].filter(Boolean).join(' · ')}</div>
    <div class="exc hidden"><input data-exc="${i.id}" placeholder="Tratamento do excesso (obrigatório)" style="width:100%;text-align:left;margin-top:4px"></div></td>
-   <td class="n">${un(i.qtd)}</td><td class="n">${un(i.qtd_aprovada)}${i.qtd_divergencia+i.qtd_baixada?'<div class="meta">+'+un(i.qtd_divergencia+i.qtd_baixada)+' div.</div>':''}</td><td class="n"><b>${un(pedPend(i))}</b></td>
+   <td class="n">${un(i.qtd)}</td><td class="n">${un(i.qtd_aprovada)}${i.qtd_divergencia+i.qtd_baixada?'<div class="meta">+'+un(i.qtd_divergencia+i.qtd_baixada)+' ocorr.</div>':''}</td><td class="n"><b>${un(pedPend(i))}</b></td>
    <td class="n"><input data-ok="${i.id}" inputmode="numeric" placeholder="0"></td><td class="n"><input data-av="${i.id}" inputmode="numeric" placeholder="0"></td><td class="n"><input data-inc="${i.id}" inputmode="numeric" placeholder="0"></td><td class="n" data-rest="${i.id}"></td></tr>`;}).join('')}</table></div>
   <div class="total" id="rc_tot"></div>
   <div class="campo"><label>Observações</label><input id="rc_o" placeholder="ex.: caixa amassada, nota fiscal…"></div>
@@ -952,16 +978,20 @@ function modalReceber(pid){
 let filtroRem='abertas';
 function totRem(r){const it=itensEnv(r);return {env:it.reduce((s,i)=>s+i.qtd_enviada,0),rec:it.reduce((s,i)=>s+i.qtd_recebida,0),pend:it.reduce((s,i)=>s+i.pend,0),div:it.reduce((s,i)=>s+(i.qtd_divergencia||0),0)};}
 function passos(r){if(r.status==='cancelado')return '';
+  if(rotaPY(r)){const o=[['preparacao','Preparação EUA'],['aladin','Aladin → Paraguai'],['paraguai','Paraguai'],['freteiro','Freteiro'],['transporte_sp','Transporte SP'],['parcial','Warehouse SP'],['recebido','Recebida']];
+    const ordem=r.status==='preparacao'?0:r.status==='parcial'?5:r.status==='recebido'?6:{aladin:1,paraguai:2,freteiro:3,transporte_sp:4}[r.etapa||'aladin']||1;
+    return `<div class="passos">${o.map(([k,n],i)=>`<span class="${i<ordem||(i===ordem&&r.status==='recebido')?'f':i===ordem?'a':''}">${n}</span>`).join('')}</div>`;}
   const o=[['preparacao','Preparação'],['transito','Trânsito internacional'],['alf','Alfândega'],['liberada','Liberada'],['parcial','Warehouse'],['recebido','Recebida']];
   const ordem={preparacao:0,transito:1,alfandega:2,fiscalizacao:2,aguardando_doc:2,aguardando_pag:2,retida:2,liberada:3,parcial:4,recebido:5}[r.status]??1;
   return `<div class="passos">${o.map(([k,n],i)=>`<span class="${i<ordem||(i===ordem&&r.status==='recebido')?'f':i===ordem?'a':''}">${i===2&&ordem===2?(ST_REM[r.status]||[n])[0]:n}</span>`).join('')}</div>`;}
 function urlRastreio(r){const c=encodeURIComponent(String(r.rastreio||'').trim());if(!c)return '';
   return /dhl/i.test(r.transportadora)?'https://www.dhl.com/br-pt/home/rastreamento.html?tracking-id='+c+'&submit=1':'https://t.17track.net/pt#nums='+c;}
 function linkRastreio(r){const u=urlRastreio(r);return u?`<a href="${u}" target="_blank" rel="noopener" onclick="event.stopPropagation()"><b>${esc(r.rastreio)}</b> ↗</a>`:'';}
+function bdgRem(r){const e=etapaDe(r);return e?`<span class="badge b-rota">${ETAPA_CURTA[e]}</span>`:bdg(ST_REM,r.status);}
 function cardRemessa(r,botao){const t=totRem(r),c=um(r.envios_custo);
-  return `<div class="card click" data-env="${r.id}"><div><div class="t">Remessa #${r.id} · ${esc(r.transportadora)} ${bdg(ST_REM,r.status)}</div>
+  return `<div class="card click" data-env="${r.id}"><div><div class="t">Remessa #${r.id} · ${esc(r.transportadora)} ${bdgRem(r)}${rotaPY(r)?'':' <span class="meta">rota direta</span>'}</div>
    <div class="meta">${esc(r.origem||'EUA')} → ${esc(r.destino||'Brasil')} · ${r.status==='preparacao'?'saída prevista':'saída'} ${fd(r.data_saida)}${r.previsao?' · chegada prevista '+fd(r.previsao):''}${r.rastreio?' · rastreio '+linkRastreio(r):''}${r.caixas?' · '+un(r.caixas)+' volume(s)':''}${r.peso_kg?' · '+numBR(r.peso_kg)+' kg':''}</div>${passos(r)}
-   ${['parcial','recebido'].includes(r.status)?`<div class="meta">Conferido no warehouse <b>${un(t.rec)}</b> de ${un(t.env)}${t.pend?' · pendente '+un(t.pend):''}${t.div?' · <b>'+un(t.div)+' em divergência</b>':''}</div>`:''}
+   ${['parcial','recebido'].includes(r.status)?`<div class="meta">Conferido no warehouse <b>${un(t.rec)}</b> de ${un(t.env)}${t.pend?' · pendente '+un(t.pend):''}${t.div?' · <b>'+un(t.div)+' com ocorrência</b>':''}</div>`:''}
    ${r.status==='recebido'&&r.encerrado_motivo?'<div class="warn">Encerrada com falta: '+esc(r.encerrado_motivo)+'</div>':''}
    ${c&&verCusto()&&['parcial','recebido'].includes(r.status)&&!c.custos_lancados?'<div class="warn">⚠ Preço de custo a lançar</div>':''}</div>
    <div class="dir"><div class="n">${un(t.env)} un.</div>${botao||'<button class="small">Abrir</button>'}</div></div>`;}
@@ -979,9 +1009,10 @@ function modalRemessa(){
   if(!ps.length){toast('Não há produtos disponíveis no estoque EUA. Receba as compras primeiro.');return;}
   zerarLidos();reabrir=null;let vols=[{numero:1}];
   abrir(`<h2>Nova remessa internacional</h2><div class="sub">Só aparecem produtos <b>disponíveis</b> no estoque EUA. Ao salvar, as quantidades ficam <b>reservadas</b>; viram "em trânsito" quando você confirmar a saída física.</div>
-  <div class="tres"><div class="campo"><label>Transportadora</label><select id="rm_t"><option>DHL</option><option>Aladin</option></select></div>
-   <div class="campo"><label>Origem</label><input id="rm_o" value="${esc(lerPref('iron_origem','EUA'))}"></div>
-   <div class="campo"><label>Destino</label><input id="rm_de" value="${esc(lerPref('iron_destino','Brasil'))}"></div></div>
+  <div class="tres"><div class="campo"><label>Transportadora</label><select id="rm_t"><option>Aladin</option><option>DHL</option><option>Etiquetas avulsas</option></select></div>
+   <div class="campo"><label>Rota</label><select id="rm_rota"><option value="paraguai">EUA → Paraguai → freteiro → SP</option><option value="direta">Direta EUA → Brasil</option></select></div>
+   <div class="campo"><label>Origem</label><input id="rm_o" value="${esc(lerPref('iron_origem','EUA'))}"></div></div>
+  <div class="tres"><div class="campo"><label>Destino</label><input id="rm_de" value="${esc(lerPref('iron_destino','São Paulo'))}"></div><div></div><div></div></div>
   <div class="tres"><div class="campo"><label>Data de envio</label><input id="rm_d" type="date" value="${hoje()}"></div>
    <div class="campo"><label>Previsão de chegada</label><input id="rm_p" type="date"></div>
    <div class="campo"><label>Código de rastreamento</label><input id="rm_r"></div></div>
@@ -997,6 +1028,7 @@ function modalRemessa(){
   <div class="campo" style="margin-top:10px"><label>Observação</label><input id="rm_obs"></div>
   ${campoArquivos('rm_arq','Etiquetas, invoices e comprovantes')}
   <div class="erro"></div><div class="rodape"><button id="cx">Cancelar</button><button class="primary" id="ok">Salvar remessa (reservar)</button></div>`);
+  $('rm_t').onchange=()=>{$('rm_rota').value=$('rm_t').value==='Aladin'?'paraguai':'direta';};
   const M=$('modal'),q=pid=>M.querySelector(`[data-q="${pid}"]`);
   const sel=()=>ps.map(p=>({p,q:num(q(p.id).value)})).filter(x=>x.q>0);
   const lerVols=()=>[...M.querySelectorAll('[data-vol]')].map(v=>({numero:+v.dataset.vol,peso:dinheiro(v.querySelector('[data-vf="peso"]').value),comp:dinheiro(v.querySelector('[data-vf="c"]').value),larg:dinheiro(v.querySelector('[data-vf="l"]').value),alt:dinheiro(v.querySelector('[data-vf="a"]').value),
@@ -1024,7 +1056,7 @@ function modalRemessa(){
     rodar($('ok'),async()=>{const id=await rpc('criar_remessa',{p:{chave,transportadora:$('rm_t').value,origem:val('rm_o'),destino:val('rm_de'),data_saida:val('rm_d'),previsao:val('rm_p'),rastreio:val('rm_r'),responsavel:val('rm_resp'),
       frete:$('rm_fr')?dinheiro(val('rm_fr'))||0:0,seguro:$('rm_sg')?dinheiro(val('rm_sg'))||0:0,despesas:$('rm_dp')?dinheiro(val('rm_dp'))||0:0,moeda_despesas:$('rm_m')?$('rm_m').value:'USD',obs:val('rm_obs'),
       itens:s.map(x=>({produto_id:x.p.id,qtd:x.q})),volumes:V.map(v=>({numero:v.numero,peso:isNaN(v.peso)?null:v.peso,comp:isNaN(v.comp)?null:v.comp,larg:isNaN(v.larg)?null:v.larg,alt:isNaN(v.alt)?null:v.alt,itens:v.itens}))}});
-      const ax=await anexarDepois('remessa',id,'rm_arq');pararCam();
+      await rpc('definir_rota',{p_id:id,p_rota:$('rm_rota').value});const ax=await anexarDepois('remessa',id,'rm_arq');pararCam();
       toast('Remessa #'+id+' salva em preparação. Itens reservados.'+ax);filtroRem='prep';aba='remessas';await carregar();modalEtiquetas(id,true);});};
 }
 function modalEditarRemessa(rid){const r=remessa(rid);reabrir=null;
@@ -1040,6 +1072,29 @@ function modalEditarRemessa(rid){const r=remessa(rid);reabrir=null;
     if($('er_fr')){p.frete=dinheiro(val('er_fr'))||0;p.seguro=dinheiro(val('er_sg'))||0;p.despesas=dinheiro(val('er_dp'))||0;}
     await rpc('atualizar_remessa',{p_id:rid,p});await carregar();toast('Remessa atualizada.');modalDetalhe(rid);});}
 
+function podeEtapa(){return tem('remessas')||tem('alfandega')||tem('warehouse');}
+function blocoEtapas(r){const es=etapasDe(r);const tot=custoEtapasBRL(r);
+  return `<h3>Rota Paraguai</h3>${es.length?es.map(e=>`<div class="item"><div style="display:flex;justify-content:space-between;gap:8px"><div><b>${ETAPA_NOME[e.etapa]||e.etapa}</b> · ${fd(e.data)}${e.responsavel?' · '+esc(e.responsavel):''}${e.telefone?' · '+esc(e.telefone):''}
+    <div class="meta">${[e.volumes?un(e.volumes)+' volume(s)':'',e.rastreio?'rastreio '+esc(e.rastreio):'',verCusto()&&+e.valor?'valor <b>'+moeda(e.valor,e.moeda)+'</b>':''].filter(Boolean).join(' · ')}${e.obs?(e.volumes||e.rastreio?'<br>':'')+esc(e.obs):''}</div>
+    <div class="meta">Lançado ${fts(e.criado_em)} por ${esc(nomeDe(e.criado_por))}</div></div>${ehAdmin()?`<button class="small" data-delet="${e.id}">Excluir</button>`:''}</div></div>`).join(''):'<div class="meta">Nenhuma etapa lançada ainda. Depois da saída dos EUA, a remessa fica em <b>Aladin → Paraguai</b>.</div>'}
+  ${verCusto()&&tot>0?`<div class="total">Fretes da rota (Aladin, freteiro, transporte SP): <b>${brl(tot)}</b> — entram no rateio do preço de custo.</div>`:''}`;}
+function modalEtapa(rid){const r=remessa(rid);if(!r)return;
+  const atual=r.etapa||'aladin',idx=ETAPAS.findIndex(x=>x[0]===atual),prox=ETAPAS[Math.min(idx+1,ETAPAS.length-1)][0];
+  const t=totRem(r);
+  abrir(`<h2>Lançar etapa — Remessa #${r.id}</h2><div class="sub">Etapa atual: <b>${ETAPA_NOME[atual]}</b>. Registre cada passo da rota EUA → Paraguai → Brasil → São Paulo. A conferência produto a produto continua sendo feita no warehouse.</div>
+  <div class="duas"><div class="campo"><label>Etapa</label><select id="et_e">${ETAPAS.map(([k,l])=>`<option value="${k}" ${k===prox?'selected':''}>${l}</option>`).join('')}</select></div>
+   <div class="campo"><label>Data</label><input id="et_d" type="date" value="${hoje()}"></div></div>
+  <div class="duas"><div class="campo"><label id="et_rl">${ETAPA_RESP[prox]}</label><input id="et_r"></div><div class="campo"><label>Telefone / WhatsApp</label><input id="et_t" inputmode="tel"></div></div>
+  <div class="duas"><div class="campo"><label>Volumes / caixas</label><input id="et_v" inputmode="numeric" value="${r.caixas||''}" placeholder="${t.env} un. na remessa"></div><div class="campo"><label>Rastreio (se tiver)</label><input id="et_rs"></div></div>
+  ${verCusto()?`<div class="duas"><div class="campo"><label>Valor pago nesta etapa</label><input id="et_val" inputmode="decimal" placeholder="0,00"></div><div class="campo"><label>Moeda</label><select id="et_m"><option>BRL</option><option>USD</option></select></div></div>`:''}
+  <div class="campo"><label>Observação</label><input id="et_o"></div>
+  ${campoArquivos('et_arq','Fotos das caixas, comprovantes, recibo do freteiro')}
+  <div class="erro"></div><div class="rodape"><button id="cx">Voltar</button><button class="primary" id="ok">Salvar etapa</button></div>`);
+  $('cx').onclick=()=>modalDetalhe(rid);
+  $('et_e').onchange=()=>{$('et_rl').textContent=ETAPA_RESP[$('et_e').value];};
+  $('ok').onclick=()=>rodar($('ok'),async()=>{const v=$('et_val')?dinheiro(val('et_val')):0;if($('et_val')&&val('et_val')&&isNaN(v))throw new Error('Valor inválido.');
+    await rpc('registrar_etapa',{p:{envio_id:rid,etapa:$('et_e').value,data:val('et_d'),responsavel:val('et_r'),telefone:val('et_t'),volumes:val('et_v')?num(val('et_v')):null,rastreio:val('et_rs'),valor:isNaN(v)?0:v||0,moeda:$('et_m')?$('et_m').value:'BRL',obs:val('et_o')}});
+    const ax=await anexarDepois('remessa',rid,'et_arq');await carregar();toast('Etapa lançada.'+ax);modalDetalhe(rid);});}
 function modalDetalhe(id){log('abriu','Remessa #'+id);
   const r=remessa(id);if(!r)return;reabrir=()=>modalDetalhe(id);
   const it=itensEnv(r),c=um(r.envios_custo),t=totRem(r);
@@ -1047,17 +1102,18 @@ function modalDetalhe(id){log('abriu','Remessa #'+id);
   const linhas=it.map(i=>{const p=produto(i.produto_id);
     const custo=i.custo&&verCusto()?(+i.custo.custo_medio_saida<=0?`<div class="meta">Preço de custo a lançar</div>`:`<div class="meta">Custo ${brl(i.custo.custo_medio_saida,4)} (${usd(i.custo.custo_usd_saida,4)}) + frete ${brl(i.custo.frete_unit,4)} + imposto ${brl(i.custo.imposto_unit,4)} = <b>custo final ${brl(i.custo.custo_br,2)}</b></div>`):'';
     return `<div class="item"><div class="pinfo" style="align-items:flex-start"><span data-zoom="${esc(p.foto_url||'')}">${foto(p,1)}</span><div><b>${esc(p.nome)}</b>${p.sku?' <span class="meta">'+esc(p.sku)+'</span>':''}
-      <div class="meta">Enviado <b>${un(i.qtd_enviada)}</b>${['parcial','recebido'].includes(r.status)?` · conferido no warehouse <b>${un(i.qtd_recebida)}</b>${i.qtd_divergencia?' · <b>'+un(i.qtd_divergencia)+' em divergência</b>':''}${i.qtd_baixada?' · '+un(i.qtd_baixada)+' baixado':''} · pendente ${un(i.pend)}`:''}</div>
+      <div class="meta">Enviado <b>${un(i.qtd_enviada)}</b>${['parcial','recebido'].includes(r.status)?` · conferido no warehouse <b>${un(i.qtd_recebida)}</b>${i.qtd_divergencia?' · <b>'+un(i.qtd_divergencia)+' com ocorrência</b>':''}${i.qtd_baixada?' · '+un(i.qtd_baixada)+' baixado':''} · pendente ${un(i.pend)}`:''}</div>
       ${(i.remessa_lotes||[]).length?`<div class="meta">Origem: ${(i.remessa_lotes||[]).map(l=>origemLote(l)+' ('+un(l.qtd)+')').join(' · ')}</div>`:''}${custo}</div></div></div>`;}).join('');
   const vols=(r.remessa_volumes||[]).sort((a,b)=>a.numero-b.numero);
   const alf=(r.alfandega_eventos||[]).sort((a,b)=>a.id-b.id);
   const chs=D.chegadas.filter(x=>x.envio_id===id).sort((a,b)=>a.id-b.id);
   const dvs=D.divergencias.filter(d=>it.some(i=>i.id===d.envio_item_id));
-  abrir(`<h2>Remessa #${r.id} · ${esc(r.transportadora)} ${bdg(ST_REM,r.status)}</h2>
+  abrir(`<h2>Remessa #${r.id} · ${esc(r.transportadora)} ${bdgRem(r)}</h2>
   <div class="sub">${esc(r.origem||'EUA')} → ${esc(r.destino||'Brasil')} · ${r.status==='preparacao'?'envio previsto':'saída'} ${fd(r.data_saida)}${r.previsao?' · chegada prevista '+fd(r.previsao):''}${r.rastreio?' · rastreio '+linkRastreio(r):' · <b>sem rastreio</b>'} · ${un(t.env)} un.${r.responsavel?' · responsável '+esc(r.responsavel):''}${nomeDe(r.criado_por)?' · criada por '+esc(nomeDe(r.criado_por)):''}
   ${r.saida_em?'<br>Saída confirmada '+fts(r.saida_em)+' por '+esc(nomeDe(r.saida_por)):''}${r.obs?'<br>Obs.: '+esc(r.obs):''}${r.encerrado_motivo?'<br>'+(r.status==='cancelado'?'Cancelada':'Encerrada')+': '+esc(r.encerrado_motivo):''}</div>${passos(r)}
   ${verCusto()?`<div class="total">Despesas da remessa: frete ${moeda(r.frete_transp,r.moeda_despesas)} · seguro ${moeda(r.seguro,r.moeda_despesas)} · demais ${moeda(r.despesas,r.moeda_despesas)}${alf.some(a=>+a.imposto+ +a.taxas>0)?' · alfândega: impostos '+brl(alf.reduce((s,a)=>s+ +a.imposto,0))+' + taxas '+brl(alf.reduce((s,a)=>s+ +a.taxas,0)):''}
    ${c?`<br>Rateio no custo: ${c.custos_lancados||+c.frete||+c.imposto?`frete <b>${brl(c.frete)}</b> · imposto <b>${brl(c.imposto)}</b>${c.cotacao?' · dólar '+numBR(c.cotacao):''}`:'ainda não lançado'}${podeCusto()&&r.status!=='cancelado'?` · <button class="link" id="custos">${c.custos_lancados?'Alterar preço de custo':'Lançar preço de custo'}</button>`:''}`:''}</div>`:''}
+  ${rotaPY(r)?blocoEtapas(r):''}
   <h3>Produtos</h3>${linhas}
   ${vols.length?`<h3>Caixas / volumes</h3><div class="scroll"><table class="planilha"><tr><th>Caixa</th><th class="n">Peso</th><th>Medidas (cm)</th><th>Itens</th></tr>${vols.map(v=>`<tr><td>${v.numero}</td><td class="n">${v.peso_kg?numBR(v.peso_kg)+' kg':'—'}</td><td>${v.comp_cm?numBR(v.comp_cm)+' × '+numBR(v.larg_cm)+' × '+numBR(v.alt_cm):'—'}</td><td>${(v.itens||[]).map(x=>esc(nomeP(x.produto_id))+' '+un(x.qtd)).join('<br>')||'—'}</td></tr>`).join('')}</table></div>`:''}
   ${alf.length?`<h3>Alfândega</h3>${alf.map(a=>`<div class="item"><b>${(ST_REM[a.status]||[a.status])[0]}</b> · ${fd(a.data)} · ${esc(nomeDe(a.criado_por))}${a.documentos?'<div class="meta">Documentos solicitados: '+esc(a.documentos)+'</div>':''}${+a.imposto||+a.taxas?(verCusto()?'<div class="meta">Impostos '+moeda(a.imposto,a.moeda)+' · taxas '+moeda(a.taxas,a.moeda)+'</div>':''):''}${a.obs?'<div class="meta">'+esc(a.obs)+'</div>':''}${anexosHtml('alfandega',a.id,tem('alfandega'))}</div>`).join('')}`:''}
@@ -1071,7 +1127,9 @@ function modalDetalhe(id){log('abriu','Remessa #'+id);
   <div class="rodape">${(r.status==='preparacao'||aCaminho(r.status))&&tem('remessas')?`<button class="danger" id="canc">Cancelar remessa</button>`:''}
   ${!['cancelado','recebido'].includes(r.status)&&tem('remessas')?'<button id="edt">Editar</button>':''}
   ${r.status!=='cancelado'&&podeCusto()?`<button id="etq">Etiquetas</button>`:''}
-  ${(aCaminho(r.status)||r.status==='parcial')&&tem('alfandega')?`<button id="alf">Atualizar alfândega</button>`:''}
+  ${!rotaPY(r)&&(aCaminho(r.status)||r.status==='parcial')&&tem('alfandega')?`<button id="alf">Atualizar alfândega</button>`:''}
+  ${!['cancelado','recebido'].includes(r.status)&&tem('remessas')?`<button id="rota">${rotaPY(r)?'Mudar para rota direta':'Mudar para rota Paraguai'}</button>`:''}
+  ${rotaPY(r)&&aCaminho(r.status)&&podeEtapa()?`<button class="primary" id="etapa">Lançar etapa</button>`:''}
   ${r.status==='parcial'&&tem('warehouse')?`<button id="enc">Encerrar com falta</button>`:''}
   ${r.status==='preparacao'&&tem('remessas')?`<button class="primary" id="saida">Confirmar saída física</button>`:''}
   ${(aCaminho(r.status)||r.status==='parcial')&&tem('warehouse')?`<button class="primary" id="cheg">Conferir no warehouse</button>`:''}<button id="cx">Fechar</button></div>`);
@@ -1081,6 +1139,9 @@ function modalDetalhe(id){log('abriu','Remessa #'+id);
   if($('custos'))$('custos').onclick=()=>modalCustos(r.id);
   if($('edt'))$('edt').onclick=()=>modalEditarRemessa(r.id);
   if($('alf'))$('alf').onclick=()=>modalAlfandega(r.id);
+  if($('etapa'))$('etapa').onclick=()=>modalEtapa(r.id);
+  if($('rota'))$('rota').onclick=()=>rodar($('rota'),async()=>{await rpc('definir_rota',{p_id:r.id,p_rota:rotaPY(r)?'direta':'paraguai'});await carregar();toast('Rota alterada.');volta();});
+  $('modal').querySelectorAll('[data-delet]').forEach(b=>b.onclick=()=>rodar(b,async()=>{if(!confirm('Excluir esta etapa?'))return;await rpc('excluir_etapa',{p_id:+b.dataset.delet});await carregar();toast('Etapa excluída.');volta();}));
   if($('saida'))$('saida').onclick=()=>{abrir(`<h2>Confirmar saída — Remessa #${r.id}</h2><div class="sub">Confirme só quando a mercadoria sair fisicamente. As ${un(t.env)} un. reservadas passam para <b>em trânsito internacional</b>. Isso não aumenta o estoque do Brasil.</div>
     <div class="duas"><div class="campo"><label>Data da saída</label><input id="sd_d" type="date" value="${hoje()}"></div><div class="campo"><label>Rastreamento</label><input id="sd_r" value="${esc(r.rastreio||'')}"></div></div>
     <div class="erro"></div><div class="rodape"><button id="cx">Voltar</button><button class="primary" id="ok">Confirmar saída</button></div>`);
@@ -1108,13 +1169,13 @@ function modalAlfandega(rid){const r=remessa(rid);reabrir=null;
 function modalChegada(rid){
   const r=remessa(rid),it=itensEnv(r).filter(i=>i.pend>0||true);zerarLidos();reabrir=null;
   const ws=D.warehouses.filter(w=>w.ativo);const wdef=r.warehouse_id||+lerPref('iron_wh',ws[0]?ws[0].id:0);
-  abrir(`<h2>Conferir no warehouse — Remessa #${r.id}</h2><div class="sub">Compare o que foi enviado com o que chegou. Pode receber em partes: só as unidades <b>aprovadas</b> entram no estoque do warehouse. Faltas continuam pendentes; avarias e incorretos vão para Divergências.</div>
+  abrir(`<h2>Conferir no warehouse — Remessa #${r.id}</h2><div class="sub">Compare o que foi enviado com o que chegou. Pode receber em partes: só as unidades <b>aprovadas</b> entram no estoque do warehouse. Faltas continuam pendentes; avarias e produtos errados ficam registrados como <b>ocorrência</b> e não entram no estoque.</div>
   <div class="tres"><div class="campo"><label>Warehouse / unidade</label><select id="ch_w">${ws.map(w=>`<option value="${w.id}" ${w.id===wdef?'selected':''}>${esc(w.nome)}${w.unidade?' · '+esc(w.unidade):''}</option>`).join('')}</select></div>
    <div class="campo"><label>Data da conferência</label><input id="ch_d" type="date" value="${hoje()}"></div><div class="campo"><label>Responsável</label><input id="ch_r" value="${esc(eu())}"></div></div>
   ${scanHtml()}
   <div class="scroll"><table class="planilha rateio"><tr><th>Produto</th><th class="n">Enviado</th><th class="n">Já conferido</th><th class="n">Esperado</th><th class="n">Aprovado agora</th><th class="n">Avariado</th><th class="n">Incorreto</th><th class="n">Fica pendente</th></tr>
   ${it.map(i=>{const p=produto(i.produto_id);return `<tr data-it="${i.id}"><td>${esc(p.nome)}<div class="meta">${esc(p.ean||p.upc||p.sku||'sem código de barras')}</div><div class="exc hidden"><input data-exc="${i.id}" placeholder="Tratamento do excesso (obrigatório)" style="width:100%;text-align:left;margin-top:4px"></div></td>
-   <td class="n">${un(i.qtd_enviada)}</td><td class="n">${un(i.qtd_recebida)}${i.qtd_divergencia?'<div class="meta">'+un(i.qtd_divergencia)+' div.</div>':''}</td><td class="n"><b>${un(i.pend)}</b></td>
+   <td class="n">${un(i.qtd_enviada)}</td><td class="n">${un(i.qtd_recebida)}${i.qtd_divergencia?'<div class="meta">'+un(i.qtd_divergencia)+' ocorr.</div>':''}</td><td class="n"><b>${un(i.pend)}</b></td>
    <td class="n"><input data-ok="${i.id}" inputmode="numeric" placeholder="0"></td><td class="n"><input data-av="${i.id}" inputmode="numeric" placeholder="0"></td><td class="n"><input data-inc="${i.id}" inputmode="numeric" placeholder="0"></td><td class="n" data-rest="${i.id}"></td></tr>`;}).join('')}</table></div>
   <div class="total" id="ch_tot"></div>
   <div class="campo"><label>Observação (faltas, avarias…)</label><input id="ch_o"></div>
@@ -1149,7 +1210,7 @@ function blocoCustos(r){
   const cot=c.cotacao?br(c.cotacao):cotPadrao();
   return `<h3>Preço de custo</h3>
   <div class="tres"><div class="campo"><label>Cotação do dólar (R$)</label><input id="k_cot" inputmode="decimal" placeholder="5,40" value="${esc(cot)}"></div>
-  <div class="campo"><label>Frete total (R$)</label><input id="k_fr" inputmode="decimal" placeholder="0,00" value="${+c.frete?br(c.frete):''}"></div>
+  <div class="campo"><label>Frete total (R$)</label><input id="k_fr" inputmode="decimal" placeholder="0,00" value="${+c.frete?br(c.frete):custoEtapasBRL(r)>0?br(custoEtapasBRL(r)):''}">${custoEtapasBRL(r)>0?'<div class="meta">Fretes da rota (Aladin + freteiro + SP): '+brl(custoEtapasBRL(r))+'</div>':''}</div>
   <div class="campo"><label>Imposto total (R$)</label><input id="k_im" inputmode="decimal" placeholder="0,00" value="${+c.imposto?br(c.imposto):''}"></div></div>
   <div class="scroll"><table class="planilha rateio"><tr><th>Produto</th><th class="n">Qtd</th><th class="n">Custo un. US$</th><th class="n">Custo R$</th><th class="n">+ Frete</th><th class="n">+ Imposto</th><th class="n">Custo final un.</th><th class="n">Total</th></tr>
   ${it.map(i=>`<tr><td>${esc(produto(i.produto_id).nome)}</td><td class="n" data-kq="${i.id}"></td><td class="n"><input data-ku="${i.id}" inputmode="decimal" placeholder="0,00" value="${i.custo&&+i.custo.custo_usd_saida?br(i.custo.custo_usd_saida):''}"></td>
@@ -1259,7 +1320,7 @@ function modalFullDet(id){const f=envFull(id);if(!f)return;reabrir=()=>modalFull
   abrir(`<h2>Full #${f.id} · ${esc(f.marketplace)}${f.conta?' · '+esc(f.conta):''} ${bdg(ST_FULL,f.status)}</h2>
   <div class="sub">${esc(wh(f.warehouse_id).nome)} → ${esc(f.cd_destino||'CD a definir')}${f.identificador?' · envio <b>'+esc(f.identificador)+'</b>':''}${f.empresa?' · '+esc(f.empresa):''}${f.data_saida?' · saída '+fd(f.data_saida):''}${f.transporte?' · '+esc(f.transporte):''}${f.volumes?' · '+un(f.volumes)+' volume(s)':''}${f.etiquetas?' · etiquetas: '+esc(f.etiquetas):''}${f.responsavel?' · '+esc(f.responsavel):''}
    ${verCusto()&&+f.custo?'<br>Custo do transporte '+moeda(f.custo,f.moeda):''}${f.conferido_em?'<br>Conferido '+fts(f.conferido_em)+' por '+esc(nomeDe(f.conferido_por)):''}${f.saida_em?' · saída confirmada '+fts(f.saida_em)+' por '+esc(nomeDe(f.saida_por)):''}${f.obs?'<br>Obs.: '+esc(f.obs):''}${f.encerrado_motivo?'<br>'+esc(f.encerrado_motivo):''}</div>
-  <div class="scroll"><table class="planilha"><tr><th>Produto</th><th class="n">Enviado</th><th class="n">Conferido</th><th class="n">Recebido Full</th><th class="n">Divergência</th><th class="n">Pendente</th><th>Origem</th></tr>
+  <div class="scroll"><table class="planilha"><tr><th>Produto</th><th class="n">Enviado</th><th class="n">Conferido</th><th class="n">Recebido Full</th><th class="n">Ocorrência</th><th class="n">Pendente</th><th>Origem</th></tr>
   ${it.map(i=>`<tr><td>${esc(nomeP(i.produto_id))}</td><td class="n">${un(i.qtd)}</td><td class="n">${i.qtd_conferida==null?'—':un(i.qtd_conferida)}</td><td class="n"><b>${un(i.qtd_recebida)}</b></td><td class="n">${i.qtd_divergencia?'<b>'+un(i.qtd_divergencia)+'</b>':'—'}</td><td class="n">${['enviado','parcial','divergencia'].includes(f.status)?un(fullPend(i)):'—'}</td><td>${(i.envio_full_lotes||[]).map(l=>loteRem(l)+' ('+un(l.qtd)+')').join(' · ')}</td></tr>`).join('')}</table></div>
   ${(f.full_recebimentos||[]).length?'<h3>Recebimentos no Full</h3>'+(f.full_recebimentos||[]).sort((a,b)=>a.id-b.id).map(r=>`<div class="item">${fd(r.data)} · ${esc(r.responsavel||'')} · ${(r.full_receb_itens||[]).map(i=>{const fi=it.find(z=>z.id===i.full_item_id)||{};return esc(nomeP(fi.produto_id))+' <b>'+un(i.qtd)+'</b>'+(i.qtd_div?' · '+un(i.qtd_div)+' '+esc(TIPO_DIV[i.tipo_div]||''):'');}).join(' · ')}${r.obs?'<div class="meta">'+esc(r.obs)+'</div>':''}</div>`).join(''):''}
   ${divergenciasHtml(dvs)}
@@ -1300,7 +1361,7 @@ function modalFullConferir(id){const f=envFull(id),it=f.envio_full_itens||[];zer
 function modalFullReceber(id){const f=envFull(id),it=(f.envio_full_itens||[]).filter(i=>fullPend(i)>0);reabrir=null;
   abrir(`<h2>Recebimento no Full — #${id}</h2><div class="sub">Lance o que o ${esc(f.marketplace)} confirmou. Pode ser parcial. O que não for confirmado pode virar divergência (falta, avaria ou incorreto).</div>
   <div class="duas"><div class="campo"><label>Data da confirmação</label><input id="fr_d" type="date" value="${hoje()}"></div><div class="campo"><label>Responsável</label><input id="fr_r" value="${esc(eu())}"></div></div>
-  <div class="scroll"><table class="planilha rateio"><tr><th>Produto</th><th class="n">Pendente</th><th class="n">Recebido pelo Full</th><th class="n">Divergência</th><th>Tipo</th></tr>
+  <div class="scroll"><table class="planilha rateio"><tr><th>Produto</th><th class="n">Pendente</th><th class="n">Recebido pelo Full</th><th class="n">Ocorrência</th><th>Tipo</th></tr>
   ${it.map(i=>`<tr><td>${esc(nomeP(i.produto_id))}</td><td class="n"><b>${un(fullPend(i))}</b></td><td class="n"><input data-fr="${i.id}" inputmode="numeric" placeholder="0"></td><td class="n"><input data-fd="${i.id}" inputmode="numeric" placeholder="0"></td>
    <td><select data-ft="${i.id}" style="width:120px"><option value="falta">Falta</option><option value="avaria">Avaria</option><option value="incorreto">Incorreto</option></select></td></tr>`).join('')}</table></div>
   <div class="campo"><label>Observação</label><input id="fr_o"></div>
@@ -1462,7 +1523,7 @@ function abaUsuarios(){
   <div class="lista">${D.perfis.map(p=>{const base=PERM_PAPEL[p.papel]||[];return `<div class="card" style="flex-wrap:wrap"><div><div class="t">${esc(p.nome||'')}</div><div class="meta">${esc(p.email||'')}</div>${p.papel?'':'<div class="warn">Aguardando liberação</div>'}</div>
     <div><select data-papel="${p.user_id}" style="min-width:170px"><option value="">Sem acesso</option>${Object.entries(PAPEIS).map(([k,l])=>`<option value="${k}" ${p.papel===k?'selected':''}>${l}</option>`).join('')}</select></div>
     ${p.papel&&p.papel!=='admin'?`<div class="perms" style="width:100%">${Object.entries(PERMS).map(([k,l])=>`<label class="${base.includes(k)?'fixo':''}"><input type="checkbox" data-perm="${p.user_id}" value="${k}" ${base.includes(k)||(p.perms||[]).includes(k)?'checked':''} ${base.includes(k)?'disabled':''}> ${l}</label>`).join('')}</div>`:''}</div>`;}).join('')}</div>
-  <div class="meta" style="margin-top:10px"><b>Administrador:</b> vê e faz tudo, inclusive custos e financeiro. <b>EUA:</b> produtos, compras, recebimento nos EUA, remessas, alfândega e custos. <b>Brasil:</b> alfândega, conferência no warehouse e Full — sem custos. <b>Sócio:</b> só visualiza, incluindo custos, gastos e aportes. As caixas marcadas em cinza vêm do perfil; as outras você libera individualmente (ex.: ver gastos, lançar aportes).</div>`;
+  <div class="meta" style="margin-top:10px"><b>Administrador (só o Iago):</b> vê e faz tudo, inclusive custos, fretes, gastos, aportes, usuários e acessos. <b>EUA:</b> produtos, compras, recebimento nos EUA, remessas e etapas — sem ver custos. <b>Brasil:</b> etapas da rota, conferência no warehouse e Full — sem custos. <b>Sócio:</b> só visualiza quantidades, etapas, rastreios e datas — sem nenhum valor. Custos, gastos e aportes não podem ser liberados para ninguém além do administrador.</div>`;
 }
 function abaCadastros(){
   const sec=(t,tipo,lst,f)=>`<h3>${t} <button class="small" data-cad="${tipo}">+ Adicionar</button></h3><div class="lista">${lst.map(x=>`<div class="card click" data-cad="${tipo}" data-cadid="${x.id}"><div><div class="t">${esc(x.nome)}${x.ativo===false?' <span class="badge b-can">Inativo</span>':''}</div><div class="meta">${f(x)}</div></div></div>`).join('')||'<div class="vazio">Nenhum cadastro.</div>'}</div>`;
@@ -1487,7 +1548,7 @@ function abaAcessos(){
   const txt=a=>a.evento==='aba'?'Abriu a aba <b>'+esc(a.detalhe)+'</b>':a.evento==='acao'?'<b>'+esc(a.detalhe)+'</b>':a.evento==='abriu'?'Abriu '+esc(a.detalhe):a.evento==='entrou'?'Entrou no sistema':esc(a.evento+' '+(a.detalhe||''));
   const lst=(D.acessos||[]).filter(a=>!filtroAc||a.user_id===filtroAc);
   const ult=p=>p.ultimo_acesso?fts(p.ultimo_acesso):'nunca';
-  const TB={pedidos:'Compra',pedido_itens:'Item de compra',recebimentos:'Recebimento',recebimento_itens:'Item recebido',compras:'Entrada EUA',produtos_custo:'Estoque EUA',envios:'Remessa',envio_itens:'Item de remessa',divergencias:'Divergência',chegadas:'Conferência BR',chegada_itens:'Item conferido',entradas_br:'Estoque BR',envios_full:'Envio Full',envio_full_itens:'Item Full',full_recebimentos:'Recebimento Full',lancamentos:'Gasto',movimentos_participantes:'Aporte',alfandega_eventos:'Alfândega',produtos:'Produto',perfis:'Usuário',ajustes_estoque:'Ajuste',anexos:'Anexo',contas:'Conta',participantes:'Participante',warehouses:'Warehouse'};
+  const TB={pedidos:'Compra',pedido_itens:'Item de compra',recebimentos:'Recebimento',recebimento_itens:'Item recebido',compras:'Entrada EUA',produtos_custo:'Estoque EUA',envios:'Remessa',envio_itens:'Item de remessa',divergencias:'Ocorrência',chegadas:'Conferência BR',chegada_itens:'Item conferido',entradas_br:'Estoque BR',envios_full:'Envio Full',envio_full_itens:'Item Full',full_recebimentos:'Recebimento Full',lancamentos:'Gasto',movimentos_participantes:'Aporte',alfandega_eventos:'Alfândega',produtos:'Produto',perfis:'Usuário',ajustes_estoque:'Ajuste',anexos:'Anexo',contas:'Conta',participantes:'Participante',warehouses:'Warehouse'};
   return `<div class="chips" style="margin:10px 0"><button class="${verAud?'':'on'}" data-aud="0">Acessos</button><button class="${verAud?'on':''}" data-aud="1">Histórico de alterações</button></div>`+(verAud?
   `${AUD.length?`<div class="scroll"><table class="planilha"><tr><th>Data e hora</th><th>Pessoa</th><th>O quê</th><th>Ação</th><th>Registro</th></tr>${AUD.map(a=>`<tr><td>${new Date(a.em).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'})}</td><td>${esc(nomeDe(a.user_id)||'sistema')}</td><td>${esc(TB[a.tabela]||a.tabela)}</td><td>${{INSERT:'Criou',UPDATE:'Alterou',DELETE:'Removeu'}[a.acao]||a.acao}</td><td>#${esc(a.registro||'')}</td></tr>`).join('')}</table></div>`:'<div class="vazio">Carregando…</div>'}`
   :`<div class="total"><b>Online agora (${on.length}):</b> ${on.length?on.map(p=>'● '+esc(p.nome||p.email)).join(' · '):'ninguém além de você'}</div>
