@@ -35,7 +35,8 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   try {
     const auth = req.headers.get("Authorization") || "";
-    const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: auth } } });
+    const chave = Deno.env.get("SUPABASE_ANON_KEY") || req.headers.get("apikey") || "";
+    const sb = createClient(Deno.env.get("SUPABASE_URL")!, chave, { global: { headers: { Authorization: auth } } });
     const { data: u } = await sb.auth.getUser();
     if (!u?.user) return json({ erro: "Faça login novamente." }, 401);
     const { data: perfil } = await sb.from("perfis").select("nome,papel").eq("user_id", u.user.id).maybeSingle();
