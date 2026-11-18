@@ -13,7 +13,14 @@ const MODELO = "claude-sonnet-5-5";       // leitura de notas (precisão)
 const MODELO_PERGUNTAS = "claude-haiku-5-5"; // perguntas: rápido; os números já chegam calculados
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, "Content-Type": "application/json" } });
 
-async function claude(system: unknown, content: unknown[], max_tokens = 4000, modelo = MODELO) {
+type Uso = (modelo: string, u: any) => void;
+const SEM_CREDITO = "Os créditos da IA acabaram. Recarregue em console.anthropic.com > Billing e depois informe o novo saldo no Painel.";
+function erroIA(m: string) { return /credit balance|billing|insufficient/i.test(m) ? SEM_CREDITO : "IA: " + m; }
+async function registrarUso(sb: any, acao: string, modelo: string, u: any) {
+  if (!u) return;
+  try { await sb.rpc("registrar_uso_ia", { p_acao: acao, p_modelo: modelo, p_in: u.input_tokens || 0, p_out: u.output_tokens || 0, p_cr: u.cache_read_input_tokens || 0, p_cw: u.cache_creation_input_tokens || 0 }); } catch (_) { /* não trava a resposta */ }
+}
+async function claude(system: unknown, content: unknown[], max_tokens = 4000, modelo = MODELO, onUso?: Uso) {
   const key = Deno.env.get("ANTHROPIC_API_KEY");
   if (!key) throw new Error("A chave da IA ainda não foi configurada no Supabase (segredo ANTHROPIC_API_KEY).");
   const r = await fetch("https://api.anthropic.com/v1/messages", {
@@ -22,7 +29,8 @@ async function claude(system: unknown, content: unknown[], max_tokens = 4000, mo
     body: JSON.stringify({ model: modelo, max_tokens, system, messages: [{ role: "user", content }] }),
   });
   const j = await r.json();
-  if (!r.ok) throw new Error("IA: " + (j?.error?.message || r.status));
+  if (!r.ok) throw new Error(erroIA(String(j?.error?.message || r.status)));
+  if (onUso) await onUso(modelo, j.usage);
   return (j.content || []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n");
 }
 
@@ -58,7 +66,7 @@ Regras: valores numéricos com ponto decimal; "impostos" = sales tax; "codigo" =
 "produto_id": use o id da lista de produtos cadastrados quando o item for claramente o mesmo produto (compare UPC/EAN/SKU primeiro, depois o nome); senão null.
 Se algo não estiver legível, deixe vazio/0 e explique em "observacao".
 Produtos cadastrados (id | nome | sku | ean | upc): ${produtos.map((p: any) => [p.id, p.nome, p.sku || "", p.ean || "", p.upc || ""].join(" | ")).join("\n")}`;
-      const txt = await claude(sys, [bloco, { type: "text", text: "Leia esta nota e devolva o JSON." }]);
+      const txt = await claude(sys, [bloco, { type: "text", text: "Leia esta nota e devolva o JSON." }], 4000, MODELO, (m, u) => registrarUso(sb, "ler_nota", m, u));
       return json({ nota: extrairJSON(txt) });
     }
 
@@ -146,7 +154,7 @@ COMPRAS = ${JSON.stringify(compras)}${verValores ? "\nVENDAS_ATACADO (valores em
       const modeloQ = (perfil.papel === "admin" && body.modelo) ? String(body.modelo) : MODELO_PERGUNTAS;
       const sistema = [{ type: "text", text: sys, cache_control: { type: "ephemeral" } }];
       if (body.stream === false) {
-        const txt = await claude(sistema as any, [{ type: "text", text: q }], 1500, modeloQ);
+        const txt = await claude(sistema as any, [{ type: "text", text: q }], 1500, modeloQ, (m, u) => registrarUso(sb, "perguntar", m, u));
         return json({ resposta: txt });
       }
       const r = await fetch("https://api.anthropic.com/v1/messages", {
@@ -154,9 +162,10 @@ COMPRAS = ${JSON.stringify(compras)}${verValores ? "\nVENDAS_ATACADO (valores em
         headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
         body: JSON.stringify({ model: modeloQ, max_tokens: 1500, stream: true, system: sistema, messages: [{ role: "user", content: q }] }),
       });
-      if (!r.ok || !r.body) { const t = await r.text(); return json({ erro: "IA: " + t.slice(0, 300) }, 500); }
+      if (!r.ok || !r.body) { const t = await r.text(); let m = t.slice(0, 300); try { m = JSON.parse(t)?.error?.message || m; } catch (_) { /* texto */ } return json({ erro: erroIA(m) }, 500); }
       // repassa só o texto, em tempo real; "\u0004" no fim = resposta completa
       let buf = "";
+      const uso: any = {};
       const tr = new TransformStream<string, string>({
         transform(chunk, ctrl) {
           buf += chunk; let i;
@@ -164,12 +173,15 @@ COMPRAS = ${JSON.stringify(compras)}${verValores ? "\nVENDAS_ATACADO (valores em
             const l = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
             if (!l.startsWith("data:")) continue;
             try { const ev = JSON.parse(l.slice(5));
+              if (ev.type === "message_start") Object.assign(uso, ev.message?.usage || {});
+              else if (ev.type === "message_delta" && ev.usage) Object.assign(uso, ev.usage);
               if (ev.type === "content_block_delta" && ev.delta?.text) ctrl.enqueue(ev.delta.text);
               else if (ev.type === "message_stop") ctrl.enqueue("\u0004");
               else if (ev.type === "error") ctrl.enqueue("\n\n(A IA teve um problema: " + (ev.error?.message || "erro") + ")");
             } catch (_) { /* linha incompleta */ }
           }
         },
+        async flush() { await registrarUso(sb, "perguntar", modeloQ, uso); },
       });
       const saida = r.body.pipeThrough(new TextDecoderStream()).pipeThrough(tr).pipeThrough(new TextEncoderStream());
       return new Response(saida, { headers: { ...CORS, "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-cache", "X-Accel-Buffering": "no" } });

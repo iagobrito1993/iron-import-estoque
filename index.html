@@ -211,7 +211,7 @@ const TIPOS_MOV={aporte:'Aporte de capital',emprestimo:'Empréstimo do participa
 const PERM_PAPEL={eua:['produtos','compras','receber_compras','remessas','alfandega'],brasil:['alfandega','warehouse','full'],socio:[]};
 const SO_ADMIN=['ver_custos','ver_financeiro','editar_financeiro','ver_aportes','editar_aportes'];
 const PERMS={produtos:'Produtos e códigos',compras:'Lançar compras',receber_compras:'Receber compras',remessas:'Remessas DHL/Aladin',alfandega:'Alfândega',warehouse:'Conferência no depósito',full:'Envios ao Full'};
-let sessao=null,perfil=null,aba=null,busca='',D={vendas:[],clientes:[],custoSaida:{},produtos:[],envios:[],compras:[],perfis:[],acessos:[],warehouses:[],participantes:[],contas:[],divergencias:[],chegadas:[],entradas:[],full:[],anexos:[],ajustes:[],pedidos:[],recebimentos:[],lancamentos:[],movimentos:[]},modoLogin='entrar',carregando=false;
+let sessao=null,perfil=null,aba=null,busca='',D={iaSaldo:null,vendas:[],clientes:[],custoSaida:{},produtos:[],envios:[],compras:[],perfis:[],acessos:[],warehouses:[],participantes:[],contas:[],divergencias:[],chegadas:[],entradas:[],full:[],anexos:[],ajustes:[],pedidos:[],recebimentos:[],lancamentos:[],movimentos:[]},modoLogin='entrar',carregando=false;
 
 // ---------- utilidades ----------
 const $=id=>document.getElementById(id);
@@ -387,6 +387,7 @@ async function carregar(){
     const N={pedidos:[],recebimentos:[],compras:[],lancamentos:[],movimentos:[],acessos:[],vendas:[],clientes:[],custoSaida:{}};
     ks.forEach((k,i)=>N[k]=rs[i].data||[]);
     if(verCusto()){mesclarSigilosos(N,await rpc('dados_sigilosos',{}));try{(await rpc('custo_saidas',{})||[]).forEach(x=>N.custoSaida[x.full_item_id]=x);}catch(e){}}
+    if(ehAdmin()){try{N.iaSaldo=await rpc('ia_saldo',{});}catch(e){N.iaSaldo=null;}}
     Object.assign(D,N);
   }catch(e){console.error(e);toast('Não foi possível atualizar os dados: '+msgErro(e));}
   carregando=false;render();
@@ -602,12 +603,26 @@ function render(){
   $('app').innerHTML=`<div class="topo"><div class="wrap"><div class="marca">${logoHtml()}</div>
     <div class="quem"><span>${esc(perfil.nome||perfil.email)}</span><span class="badge b-pap">${PAPEIS[perfil.papel]}</span>
     <button class="small" data-act="ia">🤖 Assistente</button><button class="small" data-act="atualizar">Atualizar</button><button class="small" data-act="sair">Sair</button></div></div></div>
-    <div class="wrap"><nav class="abas">${abas.map(([k,l])=>`<button class="${aba===k?'on':''}" data-aba="${k}">${l}</button>`).join('')}</nav>${conteudo}</div>`;
+    <div class="wrap">${avisoCreditosIA()}<nav class="abas">${abas.map(([k,l])=>`<button class="${aba===k?'on':''}" data-aba="${k}">${l}</button>`).join('')}</nav>${conteudo}</div>`;
   if(ativo){const b=$('busca');if(b){b.focus();b.setSelectionRange(pos,pos);}}
 }
 function barraBusca(ph,botoes=''){return `<div class="barra"><input id="busca" type="search" placeholder="${ph}" value="${esc(busca)}">${botoes}</div>`;}
 function bate(...c){const q=busca.trim().toLowerCase();return !q||c.join(' ').toLowerCase().includes(q);}
 function kpi(n,l,irPara){return `<div class="kpi${irPara?' click':''}"${irPara?` data-aba="${irPara}"`:''}><div class="n">${n}</div><div class="l">${l}</div></div>`;}
+
+// ---------- CRÉDITOS DA IA ----------
+function usd(v){return 'US$ '+(+v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});}
+function avisoCreditosIA(){const s=D.iaSaldo;if(!ehAdmin()||!s||s.restante==null||+s.restante>+s.alerta)return '';
+  return `<div class="item click" data-act="iacred" style="border:2px solid #000;margin:10px 0;font-weight:600">⚠️ ${+s.restante<=0?'Os créditos da IA acabaram':'Créditos da IA acabando: restam cerca de '+usd(s.restante)}. Recarregue em console.anthropic.com → Billing e clique aqui para informar o novo saldo.</div>`;}
+function kpiCreditosIA(){const s=D.iaSaldo;if(!ehAdmin()||!s)return '';
+  return `<div class="kpi click" data-act="iacred"><div class="n">${s.restante==null?'Informar saldo':usd(s.restante)}</div><div class="l">Créditos da IA${s.restante==null?' (para avisar quando acabar)':' · gasto no mês '+usd(s.gasto_mes)+' · aviso abaixo de '+usd(s.alerta)}</div></div>`;}
+function modalCreditosIA(){const s=D.iaSaldo||{};reabrir=null;
+  abrir(`<h2>Créditos da IA</h2><div class="sub">Abra console.anthropic.com → Billing, veja o saldo (Credit balance) e digite aqui. O sistema desconta cada uso da IA e mostra um aviso no topo quando o saldo ficar abaixo do limite.</div>
+  ${s.restante!=null?`<div class="meta">Saldo informado ${usd(s.saldo_informado)} em ${new Date(s.em).toLocaleString('pt-BR')} · gasto desde então ${usd(s.gasto)} (${un(s.usos)} uso(s)) · restante estimado <b>${usd(s.restante)}</b></div>`:''}
+  <div class="duas"><div class="campo"><label>Saldo atual no Console (US$)</label><input id="ic_s" inputmode="decimal"></div><div class="campo"><label>Avisar quando ficar abaixo de (US$)</label><input id="ic_a" inputmode="decimal" value="${numBR(s.alerta||3)}"></div></div>
+  <div class="erro"></div><div class="rodape"><button id="cx">Fechar</button><button class="primary" id="ok">Salvar</button></div>`);
+  $('cx').onclick=fechar;$('ok').onclick=()=>rodar($('ok'),async()=>{const v=dinheiro(val('ic_s'));if(!(v>=0)||val('ic_s')==='')throw new Error('Informe o saldo atual em US$.');
+    await rpc('ia_informar_saldo',{p_saldo:v,p_alerta:dinheiro(val('ic_a'))||3});await carregar();toast('Saldo da IA salvo.');fechar();render();});}
 
 // ---------- PAINEL ----------
 function resultadoPainel(){const m=hoje().slice(0,7),t=resumoAtacado(m),g=resumoAtacado(null),rm=recebidoNoMes(m);
@@ -646,7 +661,7 @@ function abaPainel(){
     ${porWh.map(x=>kpi(un(x.l),'Estoque Brasil · '+esc(x.w.nome)+(x.r?' · '+un(x.r)+' reservado':''),'brasil')).join('')}
     ${kpi(un(tf),'Em trânsito para o Full','full')}${kpi(un(nf),'Confirmado no Full','full')}${kpi(un(D.full.filter(f=>isFlex(f)&&['preparacao','conferido'].includes(f.status)).length),'Despachos a enviar (Flex/Agência)','flex')}${kpi(un(D.full.filter(f=>isFlex(f)&&['enviado','parcial'].includes(f.status)).length),'Despachos em rota / postados','flex')}
     ${Object.entries(contas).map(([k,v])=>kpi(un(v),'No Full · '+esc(k),'full')).join('')}</div>
-  ${verCusto()?resultadoPainel():''}${fin}${apo}
+  ${verCusto()?resultadoPainel():''}${fin}${apo}${ehAdmin()?'<h3>Assistente de IA</h3><div class="resumo">'+kpiCreditosIA()+'</div>':''}
   ${ehAdmin()?`<h3>Situação do sistema</h3><div class="total">
    <b>Fluxo:</b> compra nos EUA → estoque EUA → remessa Aladin até o Paraguai → travessia com freteiro → transporte até São Paulo → conferência no Depósito SP → Full. Remessas DHL / etiquetas avulsas seguem a rota direta.<br>
    <b>Sigilo:</b> custos, fretes, impostos, pagamentos, gastos e aportes aparecem só para o administrador e os sócios. O perfil EUA lança os valores, mas não os vê depois. Usuários e acessos: só o administrador.<br>
@@ -1834,6 +1849,7 @@ $('app').addEventListener('click',async e=>{
   if(a==='flex')modalFullNovo('flex');
   if(a==='agencia')modalFullNovo('agencia');
   if(a==='venda')modalVendaNova();
+  if(a==='iacred')modalCreditosIA();
   if(a==='cliente')modalCliente();
   if(a==='produto')modalNovoProduto();
   if(a==='lanc')modalLanc();
