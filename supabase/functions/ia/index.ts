@@ -67,7 +67,7 @@ Produtos cadastrados (id | nome | sku | ean | upc): ${produtos.map((p: any) => [
       if (!q.trim()) return json({ erro: "Escreva a pergunta." }, 400);
       // Dados lidos com o login de quem pergunta: as regras de acesso do banco valem aqui também.
       const verValores = perfil.papel === "admin" || perfil.papel === "socio";
-      const [prod, env, full, ent, ped, wh, sig, ec] = await Promise.all([
+      const [prod, env, full, ent, ped, wh, sig, ec, vat, cso, fit] = await Promise.all([
         sb.from("produtos").select("id,nome,sku,ean,produtos_custo(qtd_eua,qtd_reservada_eua)").limit(2000),
         sb.from("envios").select("id,transportadora,rastreio,status,etapa,rota,data_saida,previsao,remessa_etapas(etapa,data,responsavel),envio_itens(produto_id,qtd_enviada,qtd_recebida,qtd_divergencia,qtd_baixada)").neq("status", "cancelado").order("id", { ascending: false }).limit(80),
         sb.from("envios_full").select("id,marketplace,conta,cd_destino,destino,rastreio,identificador,status,data_saida,envio_full_itens(produto_id,qtd,qtd_recebida)").neq("status", "cancelado").order("id", { ascending: false }).limit(150),
@@ -76,6 +76,9 @@ Produtos cadastrados (id | nome | sku | ean | upc): ${produtos.map((p: any) => [
         sb.from("warehouses").select("id,nome"),
         verValores ? sb.rpc("dados_sigilosos") : Promise.resolve({ data: null }),
         verValores ? sb.from("envios_custo").select("envio_id,frete,imposto,cotacao,custos_lancados,valor_pago_brl") : Promise.resolve({ data: null }),
+        verValores ? sb.from("vendas_atacado").select("id,full_id,data,forma,condicao,parcelas,desconto,frete,taxas,total,clientes_atacado(nome,cidade),vendas_atacado_itens(full_item_id,preco_unit),vendas_parcelas(numero,vencimento,valor,recebido_em,valor_recebido)").order("id", { ascending: false }).limit(300) : Promise.resolve({ data: null }),
+        verValores ? sb.rpc("custo_saidas") : Promise.resolve({ data: null }),
+        verValores ? sb.from("envio_full_itens").select("id,full_id,produto_id,qtd").limit(10000) : Promise.resolve({ data: null }),
       ]);
       // resumo já calculado (a IA só lê, não precisa fazer contas)
       const um = (x: any) => Array.isArray(x) ? x[0] : x;
@@ -113,6 +116,20 @@ Produtos cadastrados (id | nome | sku | ean | upc): ${produtos.map((p: any) => [
       const despachos = (full.data || []).map((f: any) => ({ id: f.id, tipo: /flex/i.test(f.marketplace) ? "Flex" : /ag[eê]ncia/i.test(f.marketplace) ? "Agência" : "Full", conta: f.conta || undefined, cliente: f.cd_destino || undefined, destino: f.destino || undefined, venda: f.identificador || undefined, situacao: SD[f.status] || f.status, data: f.data_saida || undefined, rastreio: f.rastreio || undefined,
         produtos: (f.envio_full_itens || []).map((i: any) => `${nomeP[i.produto_id]} x${i.qtd}`) }));
       const compras = (ped.data || []).map((p: any) => ({ compra: p.id, fornecedor: p.fornecedor, numero: p.numero || undefined, data: p.data, situacao: p.status, produtos: (p.pedido_itens || []).map((i: any) => `${nomeP[i.produto_id]}: comprado ${i.qtd}, recebido ${i.qtd_aprovada}`) }));
+      const hojeS = new Date().toISOString().slice(0, 10);
+      const custoItem: Record<number, any> = {}; (((cso as any).data) || []).forEach((c: any) => custoItem[c.full_item_id] = c);
+      const itensFull: Record<number, any[]> = {}; (((fit as any).data) || []).forEach((i: any) => (itensFull[i.full_id] ||= []).push(i));
+      const stFull: Record<number, string> = {}; (full.data || []).forEach((f: any) => stFull[f.id] = f.status);
+      const atacado = (((vat as any).data) || []).filter((v: any) => stFull[v.full_id] !== "cancelado").map((v: any) => {
+        const pr: Record<number, number> = {}; (v.vendas_atacado_itens || []).forEach((i: any) => pr[i.full_item_id] = +i.preco_unit);
+        const its = itensFull[v.full_id] || []; let custo = 0, pend = false;
+        const produtos = its.map((i: any) => { const c = custoItem[i.id]; if (!c || c.pendente) pend = true; custo += c ? +c.custo : 0; return `${nomeP[i.produto_id]} x${i.qtd} a R$ ${pr[i.id] ?? "?"}`; });
+        const ps = v.vendas_parcelas || []; const rec = ps.reduce((s: number, x: any) => s + (x.recebido_em ? +(x.valor_recebido ?? x.valor) : 0), 0);
+        const aberto = ps.filter((x: any) => !x.recebido_em); const desp = (+v.frete || 0) + (+v.taxas || 0); const margem = +v.total - custo - desp;
+        return { venda: v.id, cliente: v.clientes_atacado?.nome, data: v.data, condicao: v.condicao, forma: v.forma, total: +v.total, custo_produtos: +custo.toFixed(2), custo_pendente: pend || undefined,
+          frete_e_taxas: desp, margem: +margem.toFixed(2), margem_pct: v.total > 0 ? +(margem / +v.total * 100).toFixed(1) : 0, recebido: +rec.toFixed(2), recebido_pct: v.total > 0 ? +(rec / +v.total * 100).toFixed(1) : 0,
+          a_receber: aberto.reduce((s: number, x: any) => s + +x.valor, 0), vencido: aberto.filter((x: any) => x.vencimento && x.vencimento < hojeS).reduce((s: number, x: any) => s + +x.valor, 0), produtos };
+      });
       const sys = `Você é o assistente do sistema de estoque da Iron Import. Responda em português do Brasil, de forma clara e organizada, usando APENAS os DADOS abaixo — copie os números exatamente, não recalcule nem estime.
 Fluxo: compra nos EUA → estoque EUA → remessa (rota Paraguai: Aladin → Paraguai → freteiro → transporte até SP; ou rota direta DHL/etiquetas) → depósito (Estoque Brasil) → Full ou despachos Flex/Agência do Mercado Livre.
 Para perguntas gerais como "como está meu estoque", comece pelos TOTAIS por localização (EUA, em trânsito por etapa, depósito, Full, despachos) e depois destaque os principais produtos.
@@ -123,7 +140,7 @@ TOTAIS = ${JSON.stringify(totais)}
 ESTOQUE_POR_PRODUTO = ${JSON.stringify(estoque)}
 REMESSAS = ${JSON.stringify(remessas)}
 DESPACHOS_E_FULL = ${JSON.stringify(despachos)}
-COMPRAS = ${JSON.stringify(compras)}`;
+COMPRAS = ${JSON.stringify(compras)}${verValores ? "\nVENDAS_ATACADO (valores em R$; margem = total − custo dos produtos − frete e taxas; recebimento líquido = recebido − frete e taxas) = " + JSON.stringify(atacado) : ""}`;
       const key = Deno.env.get("ANTHROPIC_API_KEY");
       if (!key) return json({ erro: "A chave da IA ainda não foi configurada." }, 500);
       const modeloQ = (perfil.papel === "admin" && body.modelo) ? String(body.modelo) : MODELO_PERGUNTAS;

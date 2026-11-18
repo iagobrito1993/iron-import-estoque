@@ -201,15 +201,17 @@ const MOEDAS=['USD','BRL','EUR','PYG'];
 const MARKETS=['Mercado Livre','Amazon','Outro'];
 const FLEX='Mercado Livre Flex',AGENCIA='Mercado Livre Agência';
 function isFlex(f){return /flex|ag[eê]ncia/i.test((f&&f.marketplace)||'');} // qualquer despacho (Flex ou Agência)
-function tipoD(f){return /ag[eê]ncia/i.test((f&&f.marketplace)||'')?'agencia':'flex';}
-const NOME_D={flex:'Flex',agencia:'Agência'};
+function isAtacado(f){return /atacado/i.test((f&&f.marketplace)||'');}
+function isCanal(f){return isFlex(f)||isAtacado(f);} // não é Full
+function tipoD(f){const m=(f&&f.marketplace)||'';return /atacado/i.test(m)?'atacado':/ag[eê]ncia/i.test(m)?'agencia':'flex';}
+const NOME_D={flex:'Flex',agencia:'Agência',atacado:'Venda atacado'};
 function stD(f){const m={...ST_FLEX};if(tipoD(f)==='agencia'){m.enviado=['Postado na agência','b-rota'];m.parcial=['Entregue em parte','b-par'];}return m;}
 const ST_FLEX={preparacao:['A despachar','b-prep'],conferido:['Separado','b-lib'],enviado:['Em rota de entrega','b-rota'],parcial:['Entregue em parte','b-par'],recebido:['Entregue','b-rec'],divergencia:['Com ocorrência','b-ret'],cancelado:['Cancelado','b-can']};
 const TIPOS_MOV={aporte:'Aporte de capital',emprestimo:'Empréstimo do participante',despesa_paga:'Despesa paga em nome da empresa',reembolso:'Reembolso ao participante',retirada:'Retirada'};
 const PERM_PAPEL={eua:['produtos','compras','receber_compras','remessas','alfandega'],brasil:['alfandega','warehouse','full'],socio:[]};
 const SO_ADMIN=['ver_custos','ver_financeiro','editar_financeiro','ver_aportes','editar_aportes'];
 const PERMS={produtos:'Produtos e códigos',compras:'Lançar compras',receber_compras:'Receber compras',remessas:'Remessas DHL/Aladin',alfandega:'Alfândega',warehouse:'Conferência no depósito',full:'Envios ao Full'};
-let sessao=null,perfil=null,aba=null,busca='',D={produtos:[],envios:[],compras:[],perfis:[],acessos:[],warehouses:[],participantes:[],contas:[],divergencias:[],chegadas:[],entradas:[],full:[],anexos:[],ajustes:[],pedidos:[],recebimentos:[],lancamentos:[],movimentos:[]},modoLogin='entrar',carregando=false;
+let sessao=null,perfil=null,aba=null,busca='',D={vendas:[],clientes:[],custoSaida:{},produtos:[],envios:[],compras:[],perfis:[],acessos:[],warehouses:[],participantes:[],contas:[],divergencias:[],chegadas:[],entradas:[],full:[],anexos:[],ajustes:[],pedidos:[],recebimentos:[],lancamentos:[],movimentos:[]},modoLogin='entrar',carregando=false;
 
 // ---------- utilidades ----------
 const $=id=>document.getElementById(id);
@@ -379,11 +381,12 @@ async function carregar(){
     if(tem('ver_financeiro'))R.lancamentos=sel('lancamentos','*',{c:'data',lim:3000});
     if(tem('ver_aportes'))R.movimentos=sel('movimentos_participantes','*',{c:'data',lim:3000});
     if(ehAdmin())R.acessos=sel('acessos','*',{lim:800});
+    if(verCusto()){R.vendas=sel('vendas_atacado','*, vendas_atacado_itens(*), vendas_parcelas(*)',{lim:2000});R.clientes=sel('clientes_atacado','*',{c:'nome',asc:true,lim:3000});}
     const ks=Object.keys(R),rs=await Promise.all(ks.map(k=>R[k]));
     const e=rs.find(x=>x.error);if(e)throw e.error;
-    const N={pedidos:[],recebimentos:[],compras:[],lancamentos:[],movimentos:[],acessos:[]};
+    const N={pedidos:[],recebimentos:[],compras:[],lancamentos:[],movimentos:[],acessos:[],vendas:[],clientes:[],custoSaida:{}};
     ks.forEach((k,i)=>N[k]=rs[i].data||[]);
-    if(verCusto())mesclarSigilosos(N,await rpc('dados_sigilosos',{}));
+    if(verCusto()){mesclarSigilosos(N,await rpc('dados_sigilosos',{}));try{(await rpc('custo_saidas',{})||[]).forEach(x=>N.custoSaida[x.full_item_id]=x);}catch(e){}}
     Object.assign(D,N);
   }catch(e){console.error(e);toast('Não foi possível atualizar os dados: '+msgErro(e));}
   carregando=false;render();
@@ -426,8 +429,8 @@ function estoqueBR(){const m={};const g=(w,p)=>{const k=w+':'+p;return m[k]=m[k]
 function brLivre(pid,w){return D.entradas.filter(e=>e.produto_id===pid&&(w==null||e.warehouse_id===w)).reduce((s,e)=>s+e.qtd-e.qtd_alocada,0);}
 function emTransitoInt(pid){let t=0,a=0;D.envios.forEach(r=>{if(!aCaminho(r.status)&&r.status!=='parcial')return;itensEnv(r).forEach(i=>{if(pid!=null&&i.produto_id!==pid)return;if(NA_ALF.includes(r.status))a+=i.pend;else t+=i.pend;});});return {t,a};}
 function fullPend(i){return Math.max(i.qtd-i.qtd_recebida-i.qtd_divergencia-i.qtd_baixada-i.qtd_devolvida,0);}
-function transitoFull(pid){let t=0;D.full.forEach(f=>{if(isFlex(f))return;if(!['enviado','parcial','divergencia'].includes(f.status))return;(f.envio_full_itens||[]).forEach(i=>{if(pid==null||i.produto_id===pid)t+=fullPend(i);});});return t;}
-function noFull(pid){let t=0;D.full.filter(f=>!isFlex(f)).forEach(f=>(f.envio_full_itens||[]).forEach(i=>{if(pid==null||i.produto_id===pid)t+=i.qtd_recebida;}));return t;}
+function transitoFull(pid){let t=0;D.full.forEach(f=>{if(isCanal(f))return;if(!['enviado','parcial','divergencia'].includes(f.status))return;(f.envio_full_itens||[]).forEach(i=>{if(pid==null||i.produto_id===pid)t+=fullPend(i);});});return t;}
+function noFull(pid){let t=0;D.full.filter(f=>!isCanal(f)).forEach(f=>(f.envio_full_itens||[]).forEach(i=>{if(pid==null||i.produto_id===pid)t+=i.qtd_recebida;}));return t;}
 function porEtapa(){const m={};D.envios.forEach(r=>{if(!aCaminho(r.status)||NA_ALF.includes(r.status))return;const k=etapaDe(r)||'direta';m[k]=(m[k]||0)+itensEnv(r).reduce((s,i)=>s+i.pend,0);});return m;}
 function divAbertas(){return D.divergencias.filter(d=>d.status==='aberta');}
 function pedPend(i){return Math.max(i.qtd-i.qtd_aprovada-i.qtd_divergencia-i.qtd_baixada,0);}
@@ -585,7 +588,7 @@ function abasDoPapel(){
   if(tem('compras')||verCusto())a.push(['compras','Compras']);
   if(tem('receber_compras')||tem('compras'))a.push(['receb','Recebimento']);
   a.push(['eua','Estoque EUA']);
-  a.push(['remessas','Remessas']);a.push(['brasil','Estoque Brasil']);a.push(['full','Full']);a.push(['flex','Despachos']);
+  a.push(['remessas','Remessas']);a.push(['brasil','Estoque Brasil']);a.push(['full','Full']);a.push(['flex','Despachos']);if(verCusto())a.push(['atacado','Atacado']);
   if(tem('ver_financeiro'))a.push(['gastos','Gastos']);
   if(tem('ver_aportes'))a.push(['aportes','Aportes']);
   if(ehAdmin()){a.push(['usuarios','Usuários']);a.push(['cadastros','Cadastros']);a.push(['acessos','Acessos']);}
@@ -594,7 +597,7 @@ function abasDoPapel(){
 function render(){
   if(!perfil||!perfil.papel)return;
   const abas=abasDoPapel();if(!abas.find(x=>x[0]===aba))aba=abas[0][0];
-  const conteudo={painel:abaPainel,produtos:abaProdutos,compras:abaCompras,receb:abaReceb,eua:abaEUA,remessas:abaRemessas,brasil:abaBrasil,full:abaFull,flex:abaFlex,diverg:abaDiverg,gastos:abaGastos,aportes:abaAportes,usuarios:abaUsuarios,cadastros:abaCadastros,acessos:abaAcessos}[aba]();
+  const conteudo={painel:abaPainel,produtos:abaProdutos,compras:abaCompras,receb:abaReceb,eua:abaEUA,remessas:abaRemessas,brasil:abaBrasil,full:abaFull,flex:abaFlex,atacado:abaAtacado,diverg:abaDiverg,gastos:abaGastos,aportes:abaAportes,usuarios:abaUsuarios,cadastros:abaCadastros,acessos:abaAcessos}[aba]();
   const ativo=document.activeElement&&document.activeElement.id==='busca';const pos=ativo?document.activeElement.selectionStart:0;
   $('app').innerHTML=`<div class="topo"><div class="wrap"><div class="marca">${logoHtml()}</div>
     <div class="quem"><span>${esc(perfil.nome||perfil.email)}</span><span class="badge b-pap">${PAPEIS[perfil.papel]}</span>
@@ -607,6 +610,11 @@ function bate(...c){const q=busca.trim().toLowerCase();return !q||c.join(' ').to
 function kpi(n,l,irPara){return `<div class="kpi${irPara?' click':''}"${irPara?` data-aba="${irPara}"`:''}><div class="n">${n}</div><div class="l">${l}</div></div>`;}
 
 // ---------- PAINEL ----------
+function resultadoPainel(){const m=hoje().slice(0,7),t=resumoAtacado(m),g=resumoAtacado(null),rm=recebidoNoMes(m);
+  return `<h3>Resultado — vendas atacado (mês)</h3><div class="resumo">${kpi(brl(t.fat),'Faturamento ('+t.n+' venda(s))','atacado')}${kpi(brl(t.custo)+(t.pend?' *':''),'Custo dos produtos vendidos','atacado')}
+   ${kpi(brl(t.margem),'Margem bruta','atacado')}${kpi(pct(t.pm),'Margem %','atacado')}${kpi(brl(rm),'Recebido no mês','atacado')}${kpi(pct(t.pr),'% recebido das vendas do mês','atacado')}
+   ${kpi(brl(rm-t.desp),'Recebimento líquido (− frete e taxas)','atacado')}${kpi(brl(g.aRec),'A receber','atacado')}${kpi(brl(g.venc),'Vencido','atacado')}</div>
+  <div class="meta">${t.pend?'* Há itens com custo em R$ pendente (fechamento da remessa não lançado). ':''}Mercado Livre (Full, Flex e Agência): margem e recebimento líquido entram aqui quando as contas forem conectadas.</div>`;}
 function abaPainel(){
   const peds=D.pedidos.filter(p=>['pendente','parcial'].includes(p.status));
   const pendUn=peds.reduce((s,p)=>s+(p.pedido_itens||[]).reduce((t,i)=>t+pedPend(i),0),0);
@@ -615,7 +623,7 @@ function abaPainel(){
   const alf=D.envios.filter(r=>NA_ALF.includes(r.status));
   const tf=transitoFull(null),nf=noFull(null),dv=divAbertas();
   const porWh=D.warehouses.map(w=>({w,l:br.filter(x=>x.wh===w.id).reduce((s,x)=>s+x.livre,0),r:br.filter(x=>x.wh===w.id).reduce((s,x)=>s+x.reserv,0)}));
-  const contas={};D.full.filter(f=>f.status!=='cancelado'&&!isFlex(f)).forEach(f=>(f.envio_full_itens||[]).forEach(i=>{if(!i.qtd_recebida)return;const k=f.marketplace+(f.conta?' · '+f.conta:'');contas[k]=(contas[k]||0)+i.qtd_recebida;}));
+  const contas={};D.full.filter(f=>f.status!=='cancelado'&&!isCanal(f)).forEach(f=>(f.envio_full_itens||[]).forEach(i=>{if(!i.qtd_recebida)return;const k=f.marketplace+(f.conta?' · '+f.conta:'');contas[k]=(contas[k]||0)+i.qtd_recebida;}));
   let fin='';
   if(tem('ver_financeiro')){const m=hoje().slice(0,7);const L=D.lancamentos.filter(l=>l.situacao!=='cancelado');
     const mes=L.filter(l=>String(l.data).slice(0,7)===m),aPagar=L.filter(l=>l.situacao==='pendente');
@@ -638,7 +646,7 @@ function abaPainel(){
     ${porWh.map(x=>kpi(un(x.l),'Estoque Brasil · '+esc(x.w.nome)+(x.r?' · '+un(x.r)+' reservado':''),'brasil')).join('')}
     ${kpi(un(tf),'Em trânsito para o Full','full')}${kpi(un(nf),'Confirmado no Full','full')}${kpi(un(D.full.filter(f=>isFlex(f)&&['preparacao','conferido'].includes(f.status)).length),'Despachos a enviar (Flex/Agência)','flex')}${kpi(un(D.full.filter(f=>isFlex(f)&&['enviado','parcial'].includes(f.status)).length),'Despachos em rota / postados','flex')}
     ${Object.entries(contas).map(([k,v])=>kpi(un(v),'No Full · '+esc(k),'full')).join('')}</div>
-  ${fin}${apo}
+  ${verCusto()?resultadoPainel():''}${fin}${apo}
   ${ehAdmin()?`<h3>Situação do sistema</h3><div class="total">
    <b>Fluxo:</b> compra nos EUA → estoque EUA → remessa Aladin até o Paraguai → travessia com freteiro → transporte até São Paulo → conferência no Depósito SP → Full. Remessas DHL / etiquetas avulsas seguem a rota direta.<br>
    <b>Sigilo:</b> custos, fretes, impostos, pagamentos, gastos e aportes aparecem só para o administrador e os sócios. O perfil EUA lança os valores, mas não os vê depois. Usuários e acessos: só o administrador.<br>
@@ -1352,6 +1360,129 @@ function abaBrasil(){
 // ---------- ENVIO PARA O FULL ----------
 let filtroFull='abertos';
 function totFull(f){const it=f.envio_full_itens||[];return {q:it.reduce((s,i)=>s+i.qtd,0),r:it.reduce((s,i)=>s+i.qtd_recebida,0),d:it.reduce((s,i)=>s+i.qtd_divergencia,0),p:it.reduce((s,i)=>s+fullPend(i),0)};}
+
+// ---------- ATACADO (venda direta) ----------
+let filtroAtac='vendas';
+const FORMAS_BR=['Pix','Boleto','Transferência','Dinheiro','Cartão de crédito','Cartão de débito','Cheque','Outra'];
+function venda(id){return D.vendas.find(v=>v.id===id);}
+function cliente(id){return D.clientes.find(c=>c.id===id)||{nome:'—'};}
+function vendasAtivas(){return D.vendas.filter(v=>{const f=envFull(v.full_id);return f&&f.status!=='cancelado';});}
+function calcVenda(v){const f=envFull(v.full_id)||{};const its=(f.envio_full_itens||[]);const pr={};(v.vendas_atacado_itens||[]).forEach(i=>pr[i.full_item_id]=+i.preco_unit);
+  let bruto=0,custo=0,pend=false;const L=its.map(i=>{const pu=pr[i.id]||0,cs=D.custoSaida[i.id];const c=cs?+cs.custo:0;if(!cs||cs.pendente)pend=true;bruto+=pu*i.qtd;custo+=c;return {i,pu,c};});
+  const total=+v.total||Math.max(bruto-(+v.desconto||0),0),desp=(+v.frete||0)+(+v.taxas||0),margem=total-custo-desp;
+  const ps=(v.vendas_parcelas||[]).slice().sort((a,b)=>a.numero-b.numero);const rec=ps.reduce((s,x)=>s+(x.recebido_em?+(x.valor_recebido??x.valor):0),0);
+  const aberto=ps.filter(x=>!x.recebido_em),aRec=aberto.reduce((s,x)=>s+ +x.valor,0),venc=aberto.filter(x=>x.vencimento&&x.vencimento<hoje()).reduce((s,x)=>s+ +x.valor,0);
+  return {f,L,bruto,total,custo,custoPend:pend,desp,margem,pm:total>0?margem/total:0,ps,rec,aRec,venc,pr:total>0?rec/total:0};}
+function pct(x){return (x*100).toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})+'%';}
+function resumoAtacado(mes){const V=vendasAtivas().filter(v=>!mes||String(v.data).slice(0,7)===mes).map(v=>({v,c:calcVenda(v)}));
+  const t={n:V.length,fat:0,custo:0,desp:0,margem:0,rec:0,aRec:0,venc:0,pend:false};V.forEach(({c})=>{t.fat+=c.total;t.custo+=c.custo;t.desp+=c.desp;t.margem+=c.margem;t.rec+=c.rec;t.aRec+=c.aRec;t.venc+=c.venc;if(c.custoPend)t.pend=true;});
+  t.pm=t.fat>0?t.margem/t.fat:0;t.pr=t.fat>0?t.rec/t.fat:0;t.liq=t.rec-t.desp;return t;}
+function recebidoNoMes(mes){let r=0;vendasAtivas().forEach(v=>(v.vendas_parcelas||[]).forEach(x=>{if(x.recebido_em&&String(x.recebido_em).slice(0,7)===mes)r+=+(x.valor_recebido??x.valor);}));return r;}
+function abaAtacado(){const m=hoje().slice(0,7),t=resumoAtacado(m),g=resumoAtacado(null);
+  const head=barraBusca('Buscar cliente, venda ou produto…','<button class="primary" data-act="venda">+ Venda atacado</button><button data-act="cliente">+ Cliente</button>')+
+  `<div class="resumo">${kpi(brl(t.fat),'Vendido no mês ('+t.n+' venda(s))')}${kpi(brl(t.margem)+' · '+pct(t.pm),'Margem bruta no mês'+(t.pend?' *':''))}${kpi(brl(recebidoNoMes(m)),'Recebido no mês')}${kpi(brl(g.aRec),'A receber (total)')}${kpi(brl(g.venc),'Vencido')}</div>
+  ${t.pend?'<div class="meta">* Há produtos com custo em R$ pendente (fechamento da remessa não lançado): a margem desses itens está incompleta.</div>':''}
+  <div class="chips" style="margin:10px 0">${chip(filtroAtac,'vendas','Vendas','fatac')}${chip(filtroAtac,'receber','A receber ('+vendasAtivas().reduce((s,v)=>s+(v.vendas_parcelas||[]).filter(x=>!x.recebido_em).length,0)+')','fatac')}${chip(filtroAtac,'clientes','Clientes ('+D.clientes.length+')','fatac')}</div>`;
+  if(filtroAtac==='clientes'){const lst=D.clientes.filter(c=>bate(c.nome,c.documento,c.cidade,c.telefone));
+    return head+`<div class="lista">${lst.length?lst.map(c=>{const vs=vendasAtivas().filter(v=>v.cliente_id===c.id).map(calcVenda);const tot=vs.reduce((s,x)=>s+x.total,0),ab=vs.reduce((s,x)=>s+x.aRec,0);
+      return `<div class="card click" data-cliente="${c.id}"><div><div class="t">${esc(c.nome)}</div><div class="meta">${[c.documento,c.telefone,c.cidade].filter(Boolean).map(esc).join(' · ')||'—'}</div></div><div class="dir"><div class="n">${brl(tot)}</div><div class="meta">${vs.length} compra(s)${ab?' · em aberto '+brl(ab):''}</div></div></div>`;}).join(''):'<div class="vazio">Nenhum cliente cadastrado.</div>'}</div>`;}
+  if(filtroAtac==='receber'){const P=[];vendasAtivas().forEach(v=>(v.vendas_parcelas||[]).forEach(x=>{if(!x.recebido_em)P.push({x,v});}));P.sort((a,b)=>String(a.x.vencimento).localeCompare(String(b.x.vencimento)));
+    const lst=P.filter(({v})=>bate(cliente(v.cliente_id).nome,'#'+v.id));
+    return head+`<div class="lista">${lst.length?lst.map(({x,v})=>{const vc=x.vencimento&&x.vencimento<hoje();return `<div class="card"><div><div class="t">${esc(cliente(v.cliente_id).nome)} · venda #${v.id} · parcela ${x.numero}/${v.parcelas}${vc?' <span class="badge b-ret">Vencida</span>':''}</div><div class="meta">Vencimento ${fd(x.vencimento)}${v.forma?' · '+esc(v.forma):''}</div></div><div class="dir"><div class="n">${brl(x.valor)}</div><button class="small primary" data-parc="${x.id}">Receber</button></div></div>`;}).join(''):'<div class="vazio">Nada a receber.</div>'}</div>`;}
+  const lst=D.vendas.slice().sort((a,b)=>b.id-a.id).filter(v=>{const f=envFull(v.full_id);return bate('#'+v.id,cliente(v.cliente_id).nome,...((f&&f.envio_full_itens)||[]).map(i=>nomeP(i.produto_id)));});
+  return head+`<div class="lista">${lst.length?lst.map(v=>{const c=calcVenda(v),f=c.f,canc=f.status==='cancelado';
+    return `<div class="card click" data-venda="${v.id}" style="${canc?'opacity:.55':''}"><div><div class="t">Venda #${v.id} · <b>${esc(cliente(v.cliente_id).nome)}</b> ${bdg(stD(f),f.status)}</div>
+     <div class="meta">${fd(v.data)} · ${(f.envio_full_itens||[]).map(i=>esc(nomeP(i.produto_id))+' × '+un(i.qtd)).join(' · ')}</div>
+     <div class="meta">${esc(v.condicao||'')}${v.forma?' · '+esc(v.forma):''} · recebido ${brl(c.rec)} de ${brl(c.total)} (${pct(c.pr)}) · margem ${brl(c.margem)} (${pct(c.pm)})${c.custoPend?' *':''}</div></div>
+     <div class="dir"><div class="n">${brl(c.total)}</div>${c.venc?'<div class="warn">Vencido '+brl(c.venc)+'</div>':''}</div></div>`;}).join(''):'<div class="vazio">Nenhuma venda ainda.</div>'}</div>`;}
+function modalCliente(id,depois){const c=id?cliente(id):{};reabrir=null;
+  abrir(`<h2>${id?'Cliente — '+esc(c.nome):'Novo cliente'}</h2>
+  <div class="duas"><div class="campo"><label>Nome / razão social</label><input id="cl_n" value="${esc(c.nome||'')}"></div><div class="campo"><label>CNPJ / CPF</label><input id="cl_d" value="${esc(c.documento||'')}"></div></div>
+  <div class="tres"><div class="campo"><label>Telefone / WhatsApp</label><input id="cl_t" value="${esc(c.telefone||'')}"></div><div class="campo"><label>E-mail</label><input id="cl_e" value="${esc(c.email||'')}"></div><div class="campo"><label>Cidade / UF</label><input id="cl_c" value="${esc(c.cidade||'')}"></div></div>
+  <div class="campo"><label>Endereço</label><input id="cl_a" value="${esc(c.endereco||'')}"></div><div class="campo"><label>Observação (condição combinada, contato etc.)</label><input id="cl_o" value="${esc(c.obs||'')}"></div>
+  ${id?'<h3>Compras</h3>'+(vendasAtivas().filter(v=>v.cliente_id===id).map(v=>{const k=calcVenda(v);return `<div class="item click" data-vdet="${v.id}">Venda #${v.id} · ${fd(v.data)} · <b>${brl(k.total)}</b> · recebido ${pct(k.pr)}${k.aRec?' · em aberto '+brl(k.aRec):''}</div>`;}).join('')||'<div class="meta">Nenhuma compra.</div>'):''}
+  <div class="erro"></div><div class="rodape"><button id="cx">Fechar</button>${!id||ehAdmin()?'<button class="primary" id="ok">Salvar</button>':''}</div>`);
+  $('cx').onclick=fechar;$('modal').querySelectorAll('[data-vdet]').forEach(e=>e.onclick=()=>modalVendaDet(+e.dataset.vdet));
+  if($('ok'))$('ok').onclick=()=>rodar($('ok'),async()=>{const nid=await rpc('salvar_cliente_atacado',{p:{id:id||null,nome:val('cl_n'),documento:val('cl_d'),telefone:val('cl_t'),email:val('cl_e'),cidade:val('cl_c'),endereco:val('cl_a'),obs:val('cl_o')}});
+    await carregar();toast('Cliente salvo.');if(depois)depois(nid);else{aba='atacado';filtroAtac='clientes';fechar();render();}});}
+function modalVendaNova(){const ws=D.warehouses.filter(w=>w.ativo);let w=+lerPref('iron_wh',ws[0]?ws[0].id:0);if(!ws.find(x=>x.id===w)&&ws[0])w=ws[0].id;
+  zerarLidos();reabrir=null;const prods=()=>D.produtos.map(p=>({p,d:brLivre(p.id,w)})).filter(x=>x.d>0).sort((a,b)=>a.p.nome.localeCompare(b.p.nome));
+  abrir(`<h2>Nova venda atacado</h2><div class="sub">Os produtos saem do Estoque Brasil (ficam reservados até a entrega). Preços, condição e recebimentos ficam visíveis só para você e os sócios.</div>
+  <div class="tres"><div class="campo"><label>Cliente</label><select id="va_c"><option value="">— escolha —</option>${D.clientes.map(c=>`<option value="${c.id}">${esc(c.nome)}</option>`).join('')}<option value="novo">+ Cadastrar novo cliente</option></select></div>
+   <div class="campo"><label>Data da venda</label><input id="va_d" type="date" value="${hoje()}"></div>
+   <div class="campo"><label>Depósito de saída</label><select id="va_w">${ws.map(x=>`<option value="${x.id}" ${x.id===w?'selected':''}>${esc(x.nome)}</option>`).join('')}</select></div></div>
+  <div id="va_novo" class="hidden"><div class="tres"><div class="campo"><label>Nome / razão social</label><input id="vn_n"></div><div class="campo"><label>CNPJ / CPF</label><input id="vn_d"></div><div class="campo"><label>Telefone</label><input id="vn_t"></div></div></div>
+  ${scanHtml('Bipe os produtos vendidos')}
+  <div class="scroll"><table class="planilha" id="va_tab"><tr><th>Produto</th><th class="n">Disponível</th><th class="n">Qtd</th><th class="n">Preço un. (R$)</th><th class="n">Total</th></tr></table></div>
+  <div class="tres" style="margin-top:10px"><div class="campo"><label>Desconto (R$)</label><input id="va_de" inputmode="decimal"></div><div class="campo"><label>Frete pago por nós (R$)</label><input id="va_fr" inputmode="decimal"></div><div class="campo"><label>Taxas (boleto, cartão…) (R$)</label><input id="va_tx" inputmode="decimal"></div></div>
+  <h3>Condição de pagamento / recebimento</h3>
+  <div class="tres"><div class="campo"><label>Forma</label><select id="va_f">${FORMAS_BR.map(f=>`<option>${f}</option>`).join('')}</select></div>
+   <div class="campo"><label>Condição</label><select id="va_cd"><option value="avista">À vista</option><option value="prazo">A prazo / parcelado</option></select></div>
+   <div class="campo" id="va_rcw"><label><input type="checkbox" id="va_rc" style="width:auto"> Já recebido agora</label></div></div>
+  <div class="tres hidden" id="va_parc"><div class="campo"><label>Nº de parcelas</label><input id="va_n" inputmode="numeric" value="1"></div><div class="campo"><label>1º vencimento</label><input id="va_v1" type="date"></div><div class="campo"><label>Intervalo (dias)</label><input id="va_iv" inputmode="numeric" value="30"></div></div>
+  <div class="total" id="va_tot"></div>
+  <div class="campo"><label>Observação</label><input id="va_o"></div>${campoArquivos('va_arq','Pedido, nota fiscal e comprovantes')}
+  <div class="erro"></div><div class="rodape"><button id="cx">Cancelar</button><button class="primary" id="ok">Salvar venda</button></div>`);
+  const M=$('modal');let L=[];const q=(k,pid)=>M.querySelector(`[data-v${k}="${pid}"]`);
+  const des=()=>{L=prods();const t=$('va_tab');t.querySelectorAll('tr[data-l]').forEach(r=>r.remove());
+    t.insertAdjacentHTML('beforeend',L.length?L.map(x=>`<tr data-l="${x.p.id}"><td>${esc(x.p.nome)}<div class="meta">${esc(x.p.sku||x.p.ean||'')}</div></td><td class="n">${un(x.d)}</td><td class="n"><input data-vq="${x.p.id}" inputmode="numeric" placeholder="0" style="width:70px"></td><td class="n"><input data-vp="${x.p.id}" inputmode="decimal" placeholder="0,00" style="width:90px"></td><td class="n" data-vt="${x.p.id}"></td></tr>`).join(''):'<tr data-l="0"><td colspan="5">Nada disponível neste depósito.</td></tr>');calc();};
+  const parcelas=(total)=>{if($('va_cd').value==='avista')return [{numero:1,vencimento:val('va_d')||hoje(),valor:+total.toFixed(2)}];
+    const n=Math.max(num(val('va_n')),1),iv=num(val('va_iv'))||30,v1=val('va_v1')||val('va_d')||hoje();const base=Math.floor(total/n*100)/100;const P=[];
+    for(let k=0;k<n;k++){const d=new Date(v1+'T12:00:00');d.setDate(d.getDate()+iv*k);P.push({numero:k+1,vencimento:d.toISOString().slice(0,10),valor:k===n-1?+(total-base*(n-1)).toFixed(2):base});}return P;};
+  const calc=()=>{const s=L.map(x=>({...x,q:num((q('q',x.p.id)||{}).value),pu:dinheiro((q('p',x.p.id)||{}).value)||0})).filter(x=>x.q>0);
+    s.forEach(x=>{const e=q('t',x.p.id);if(e)e.textContent=brl(x.q*x.pu);});L.forEach(x=>{if(!s.find(y=>y.p.id===x.p.id)){const e=q('t',x.p.id);if(e)e.textContent='';}});
+    const bruto=s.reduce((t,x)=>t+x.q*x.pu,0),de=dinheiro(val('va_de'))||0,total=Math.max(bruto-de,0),P=parcelas(total);
+    $('va_parc').classList.toggle('hidden',$('va_cd').value==='avista');$('va_rcw').classList.toggle('hidden',$('va_cd').value!=='avista');
+    $('va_tot').innerHTML=s.length?`<b>${un(s.reduce((t,x)=>t+x.q,0))} un.</b> · produtos ${brl(bruto)}${de?' − desconto '+brl(de):''} = <b>Total ${brl(total)}</b><br>${P.map(p=>`Parcela ${p.numero}: ${brl(p.valor)} em ${fd(p.vencimento)}`).join(' · ')}`:'Nenhum produto selecionado.';
+    return {s,bruto,de,total,P};};
+  des();$('va_w').onchange=()=>{w=+$('va_w').value;des();};
+  $('va_c').onchange=()=>$('va_novo').classList.toggle('hidden',$('va_c').value!=='novo');
+  M.addEventListener('input',calc);M.addEventListener('change',calc);
+  ligarScan({nome:'lista de disponíveis',get itens(){return L.map(x=>({k:x.p.id,pid:x.p.id,esp:x.d}));},atual:k=>num((q('q',k)||{}).value),somar:(k,n)=>{const e=q('q',k);if(e){e.value=num(e.value)+n;calc();}}});
+  $('cx').onclick=()=>{pararCam();fechar();};const chave=uuid();
+  $('ok').onclick=()=>{const er=M.querySelector('.erro');const c=calc();
+    if($('va_c').value===''){er.textContent='Escolha o cliente.';return;}if($('va_c').value==='novo'&&!val('vn_n')){er.textContent='Informe o nome do novo cliente.';return;}
+    if(!c.s.length){er.textContent='Informe a quantidade de pelo menos um produto.';return;}
+    const ex=c.s.find(x=>x.q>x.d);if(ex){er.textContent=ex.p.nome+': só há '+un(ex.d)+' un. disponíveis.';return;}
+    if(c.s.some(x=>!(x.pu>0))){er.textContent='Informe o preço de todos os produtos.';return;}
+    gravarPref('iron_wh',String(w));
+    rodar($('ok'),async()=>{let cid=+$('va_c').value;
+      if($('va_c').value==='novo')cid=await rpc('salvar_cliente_atacado',{p:{nome:val('vn_n'),documento:val('vn_d'),telefone:val('vn_t')}});
+      const nomeC=$('va_c').value==='novo'?val('vn_n'):cliente(cid).nome;
+      const fid=await rpc('criar_envio_full',{p:{chave,warehouse_id:w,marketplace:'Atacado',conta:nomeC,cd_destino:nomeC,identificador:'',data_saida:val('va_d'),transporte:'',responsavel:eu(),volumes:null,etiquetas:'',custo:0,obs:val('va_o'),itens:c.s.map(x=>({produto_id:x.p.id,qtd:x.q}))}});
+      try{await carregar();const f=envFull(fid);const its=(f&&f.envio_full_itens)||[];
+        const itens=c.s.map(x=>({full_item_id:(its.find(i=>i.produto_id===x.p.id)||{}).id,preco_unit:x.pu})).filter(x=>x.full_item_id);
+        const vid=await rpc('salvar_venda_atacado',{p:{full_id:fid,cliente_id:cid,data:val('va_d'),forma:$('va_f').value,condicao:$('va_cd').value==='avista'?'À vista':(c.P.length+'x a cada '+(num(val('va_iv'))||30)+' dias'),parcelas:c.P.length,prazo_dias:$('va_cd').value==='avista'?0:num(val('va_iv'))||30,
+          desconto:c.de,frete:dinheiro(val('va_fr'))||0,taxas:dinheiro(val('va_tx'))||0,total:+c.total.toFixed(2),obs:val('va_o'),itens,parcelas_lista:c.P}});
+        if($('va_cd').value==='avista'&&$('va_rc').checked){await carregar();const v=venda(vid);const p1=v&&(v.vendas_parcelas||[])[0];if(p1)await rpc('receber_parcela',{p_id:p1.id,p_data:val('va_d')||hoje(),p_valor:+p1.valor,p_forma:$('va_f').value,p_obs:''});}
+        const ax=await anexarDepois('full',fid,'va_arq');pararCam();await carregar();toast('Venda #'+vid+' salva.'+ax);aba='atacado';filtroAtac='vendas';modalVendaDet(vid);
+      }catch(err){try{await rpc('cancelar_envio_full',{p_id:fid,p_motivo:'Venda não concluída: '+msgErro(err)});}catch(e){}throw err;}});};}
+function modalVendaDet(id){const v=venda(id);if(!v)return;reabrir=()=>modalVendaDet(id);const c=calcVenda(v),f=c.f,cl=cliente(v.cliente_id);
+  abrir(`<h2>Venda #${v.id} · ${esc(cl.nome)} ${bdg(stD(f),f.status)}</h2>
+  <div class="sub">${fd(v.data)} · ${esc(v.condicao||'')}${v.forma?' · '+esc(v.forma):''}${cl.telefone?' · '+esc(cl.telefone):''}${cl.documento?' · '+esc(cl.documento):''}${v.obs?'<br>Obs.: '+esc(v.obs):''}</div>
+  <div class="resumo">${kpi(brl(c.total),'Total da venda')}${kpi(brl(c.custo)+(c.custoPend?' *':''),'Custo dos produtos')}${kpi(brl(c.margem)+' · '+pct(c.pm),'Margem bruta')}${kpi(brl(c.rec)+' · '+pct(c.pr),'Recebido')}${kpi(brl(c.rec-c.desp),'Recebimento líquido')}</div>
+  <div class="meta">Margem = total − custo dos produtos (fechamento em R$ das remessas) − frete ${brl(+v.frete)} − taxas ${brl(+v.taxas)}. Recebimento líquido = recebido − frete − taxas.${c.custoPend?' * Algum produto ainda está com custo em R$ pendente.':''}</div>
+  <div class="scroll"><table class="planilha" style="margin-top:8px"><tr><th>Produto</th><th class="n">Qtd</th><th class="n">Preço un.</th><th class="n">Total</th><th class="n">Custo</th><th class="n">Margem</th></tr>
+  ${c.L.map(x=>`<tr><td>${esc(nomeP(x.i.produto_id))}</td><td class="n">${un(x.i.qtd)}</td><td class="n">${brl(x.pu)}</td><td class="n">${brl(x.pu*x.i.qtd)}</td><td class="n">${x.c?brl(x.c):'—'}</td><td class="n">${brl(x.pu*x.i.qtd-x.c)}</td></tr>`).join('')}</table></div>
+  <h3>Parcelas e recebimentos</h3>
+  ${c.ps.map(x=>`<div class="item" style="display:flex;justify-content:space-between;gap:8px"><div>Parcela ${x.numero}/${v.parcelas} · ${brl(x.valor)} · vence ${fd(x.vencimento)}
+     ${x.recebido_em?`<div class="meta">Recebido ${brl(x.valor_recebido??x.valor)} em ${fd(x.recebido_em)}${x.forma?' · '+esc(x.forma):''}${x.obs?' · '+esc(x.obs):''}</div>`:(x.vencimento&&x.vencimento<hoje()?'<div class="warn">Vencida</div>':'')}</div>
+     ${x.recebido_em?(ehAdmin()?`<button class="small" data-estp="${x.id}">Estornar</button>`:''):`<button class="small primary" data-recp="${x.id}">Receber</button>`}</div>`).join('')}
+  <h3>Pedido, nota e comprovantes</h3>${anexosHtml('full',f.id,true)}
+  <div class="erro"></div><div class="rodape"><button id="ent">Saída / entrega dos produtos</button><button id="cx">Fechar</button></div>`);
+  $('cx').onclick=fechar;$('ent').onclick=()=>modalFullDet(f.id);
+  $('modal').querySelectorAll('[data-recp]').forEach(b=>b.onclick=()=>modalReceberParcela(+b.dataset.recp));
+  $('modal').querySelectorAll('[data-estp]').forEach(b=>b.onclick=()=>rodar(b,async()=>{if(!confirm('Estornar este recebimento?'))return;await rpc('estornar_parcela',{p_id:+b.dataset.estp});await carregar();toast('Recebimento estornado.');modalVendaDet(id);}));}
+function modalReceberParcela(pid){let v=null,x=null;D.vendas.forEach(vv=>(vv.vendas_parcelas||[]).forEach(pp=>{if(pp.id===pid){v=vv;x=pp;}}));if(!x)return;
+  abrir(`<h2>Receber parcela ${x.numero}/${v.parcelas} — ${esc(cliente(v.cliente_id).nome)}</h2><div class="sub">Venda #${v.id} · valor ${brl(x.valor)} · vencimento ${fd(x.vencimento)}</div>
+  <div class="tres"><div class="campo"><label>Data do recebimento</label><input id="rp_d" type="date" value="${hoje()}"></div><div class="campo"><label>Valor recebido (R$)</label><input id="rp_v" inputmode="decimal" value="${numBR(x.valor)}"></div>
+   <div class="campo"><label>Forma</label><select id="rp_f">${FORMAS_BR.map(f=>`<option ${f===v.forma?'selected':''}>${f}</option>`).join('')}</select></div></div>
+  <div class="campo"><label>Observação</label><input id="rp_o"></div>${campoArquivos('rp_arq','Comprovante do recebimento')}
+  <div class="erro"></div><div class="rodape"><button id="cx">Voltar</button><button class="primary" id="ok">Confirmar recebimento</button></div>`);
+  $('cx').onclick=()=>modalVendaDet(v.id);
+  $('ok').onclick=()=>rodar($('ok'),async()=>{const vl=dinheiro(val('rp_v'));if(!(vl>0))throw new Error('Informe o valor recebido.');
+    await rpc('receber_parcela',{p_id:pid,p_data:val('rp_d')||hoje(),p_valor:vl,p_forma:$('rp_f').value,p_obs:val('rp_o')});const ax=await anexarDepois('full',v.full_id,'rp_arq');await carregar();toast('Recebimento registrado.'+ax);modalVendaDet(v.id);});}
+
 let filtroFlex='abrir',tipoFlex='todos';
 function abaFlex(){const F=D.full.filter(isFlex).filter(x=>tipoFlex==='todos'||tipoD(x)===tipoFlex);
   const G={abrir:x=>['preparacao','conferido'].includes(x.status),rota:x=>['enviado','parcial'].includes(x.status),ent:x=>x.status==='recebido',oco:x=>x.status==='divergencia',todos:()=>true};
@@ -1371,9 +1502,9 @@ function abaFlex(){const F=D.full.filter(isFlex).filter(x=>tipoFlex==='todos'||t
 }
 function abaFull(){
   const f={abertos:x=>['preparacao','conferido'].includes(x.status),transito:x=>['enviado','parcial'].includes(x.status),div:x=>x.status==='divergencia',rec:x=>x.status==='recebido',todos:()=>true}[filtroFull];
-  const lst=D.full.filter(x=>!isFlex(x)).filter(f).filter(x=>bate('#'+x.id,x.marketplace,x.conta,x.identificador,x.cd_destino,...(x.envio_full_itens||[]).map(i=>nomeP(i.produto_id))));
-  const n=fn=>D.full.filter(x=>!isFlex(x)).filter(fn).length;
-  const contas={};D.full.filter(x=>x.status!=='cancelado'&&!isFlex(x)).forEach(x=>(x.envio_full_itens||[]).forEach(i=>{if(!i.qtd_recebida)return;const k=x.marketplace+(x.conta?' · '+x.conta:'');contas[k]=(contas[k]||0)+i.qtd_recebida;}));
+  const lst=D.full.filter(x=>!isCanal(x)).filter(f).filter(x=>bate('#'+x.id,x.marketplace,x.conta,x.identificador,x.cd_destino,...(x.envio_full_itens||[]).map(i=>nomeP(i.produto_id))));
+  const n=fn=>D.full.filter(x=>!isCanal(x)).filter(fn).length;
+  const contas={};D.full.filter(x=>x.status!=='cancelado'&&!isCanal(x)).forEach(x=>(x.envio_full_itens||[]).forEach(i=>{if(!i.qtd_recebida)return;const k=x.marketplace+(x.conta?' · '+x.conta:'');contas[k]=(contas[k]||0)+i.qtd_recebida;}));
   return barraBusca('Buscar envio, conta, identificador ou produto…',tem('full')?'<button class="primary" data-act="full">+ Envio para o Full</button>':'')+
   `<div class="resumo">${kpi(un(transitoFull(null)),'Em trânsito para o Full')}${Object.entries(contas).map(([k,v])=>kpi(un(v),'Confirmado · '+esc(k))).join('')||kpi('0','Confirmado no Full')}</div>
   <div class="chips" style="margin-bottom:10px">${chip(filtroFull,'abertos','Em preparação / conferidos ('+n(x=>['preparacao','conferido'].includes(x.status))+')','ffull')}${chip(filtroFull,'transito','Enviados ('+n(x=>['enviado','parcial'].includes(x.status))+')','ffull')}${chip(filtroFull,'div','Com divergência ('+n(x=>x.status==='divergencia')+')','ffull')}${chip(filtroFull,'rec','Recebidos','ffull')}${chip(filtroFull,'todos','Todos','ffull')}</div>
@@ -1429,7 +1560,7 @@ function modalFullNovo(flex){
       if(flex&&(val('de_dst')||val('de_ras')))await rpc('salvar_despacho',{p_id:id,p_destino:val('de_dst'),p_rastreio:$('de_ras')?val('de_ras'):''});
       const ax=await anexarDepois('full',id,'fu_arq');pararCam();await carregar();toast((flex?'Despacho '+(ag?'Agência':'Flex')+' #':'Envio Full #')+id+' criado. Itens reservados.'+ax);aba=flex?'flex':'full';if(flex)filtroFlex='abrir';else filtroFull='abertos';modalFullDet(id);});};
 }
-function modalFullDet(id){const f=envFull(id);if(!f)return;reabrir=()=>modalFullDet(id);log('abriu',(isFlex(f)?'Despacho '+NOME_D[tipoD(f)]+' #':'Envio Full #')+id);setTimeout(()=>{if(isFlex(f))rotularFlex(f);},0);
+function modalFullDet(id){const f=envFull(id);if(!f)return;reabrir=()=>modalFullDet(id);log('abriu',(isFlex(f)?'Despacho '+NOME_D[tipoD(f)]+' #':'Envio Full #')+id);setTimeout(()=>{if(isCanal(f))rotularFlex(f);},0);
   const it=f.envio_full_itens||[],t=totFull(f),dvs=D.divergencias.filter(d=>it.some(i=>i.id===d.full_item_id));
   const loteRem=l=>{const e=D.entradas.find(x=>x.id===l.entrada_br_id);if(!e)return '';const r=D.envios.find(v=>(v.envio_itens||[]).some(i=>i.id===e.envio_item_id));return r?'remessa #'+r.id:'devolução';};
   abrir(`<h2>Full #${f.id} · ${esc(f.marketplace)}${f.conta?' · '+esc(f.conta):''} ${bdg(ST_FULL,f.status)}</h2>
@@ -1674,7 +1805,7 @@ function abaAcessos(){
 
 // ---------- eventos ----------
 $('app').addEventListener('click',async e=>{
-  const t=e.target.closest('[data-aba],[data-act],[data-fe],[data-env],[data-prod],[data-ped],[data-receber],[data-conferir],[data-full],[data-resdiv],[data-lanc],[data-mov],[data-cad],[data-aud],[data-fped],[data-frec],[data-frem],[data-fwh],[data-ffull],[data-fflex],[data-tflex],[data-fdiv],[data-feua]');if(!t)return;
+  const t=e.target.closest('[data-aba],[data-act],[data-fe],[data-env],[data-prod],[data-ped],[data-receber],[data-conferir],[data-full],[data-resdiv],[data-lanc],[data-mov],[data-cad],[data-aud],[data-fped],[data-frec],[data-frem],[data-fwh],[data-ffull],[data-fflex],[data-fatac],[data-venda],[data-cliente],[data-parc],[data-tflex],[data-fdiv],[data-feua]');if(!t)return;
   const d=t.dataset;
   if(d.receber){modalReceber(+d.receber);return;}
   if(d.conferir){modalChegada(+d.conferir);return;}
@@ -1683,12 +1814,15 @@ $('app').addEventListener('click',async e=>{
   if(d.ped){modalPedidoDet(+d.ped);return;}
   if(d.env){modalDetalhe(+d.env);return;}
   if(d.full){modalFullDet(+d.full);return;}
+  if(d.venda){modalVendaDet(+d.venda);return;}
+  if(d.cliente){modalCliente(+d.cliente);return;}
+  if(d.parc){modalReceberParcela(+d.parc);return;}
   if(d.lanc){modalLanc(+d.lanc);return;}
   if(d.mov){modalMov(+d.mov);return;}
   if(d.cad){modalCad(d.cad,d.cadid?+d.cadid:null);return;}
   if(d.aud!=null){verAud=d.aud==='1';render();if(verAud){const r=await sb.from('auditoria').select('*').order('id',{ascending:false}).limit(400);AUD=r.data||[];render();}return;}
   if(d.aba){aba=d.aba;busca='';log('aba',t.textContent.trim());render();window.scrollTo(0,0);return;}
-  const fs={fped:v=>filtroPed=v,frec:v=>filtroRec=v,frem:v=>filtroRem=v,fwh:v=>filtroWh=v,ffull:v=>filtroFull=v,fflex:v=>filtroFlex=v,tflex:v=>tipoFlex=v,fdiv:v=>filtroDiv=v,feua:v=>filtroEUA=v};
+  const fs={fped:v=>filtroPed=v,frec:v=>filtroRec=v,frem:v=>filtroRem=v,fwh:v=>filtroWh=v,ffull:v=>filtroFull=v,fflex:v=>filtroFlex=v,fatac:v=>filtroAtac=v,tflex:v=>tipoFlex=v,fdiv:v=>filtroDiv=v,feua:v=>filtroEUA=v};
   for(const k in fs)if(d[k]){fs[k](d[k]);render();return;}
   const a=d.act;
   if(a==='sair')sb.auth.signOut();
@@ -1699,6 +1833,8 @@ $('app').addEventListener('click',async e=>{
   if(a==='full')modalFullNovo();
   if(a==='flex')modalFullNovo('flex');
   if(a==='agencia')modalFullNovo('agencia');
+  if(a==='venda')modalVendaNova();
+  if(a==='cliente')modalCliente();
   if(a==='produto')modalNovoProduto();
   if(a==='lanc')modalLanc();
   if(a==='mov')modalMov();
