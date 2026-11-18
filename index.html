@@ -574,7 +574,7 @@ function abaPainel(){
     ${kpi(un(eua),'Disponível nos EUA','eua')}${kpi(un(euaR),'Reservado em remessas (EUA)','remessas')}
     ${ETAPAS.map(([k])=>kpi(un(pe[k]||0),ETAPA_CURTA[k],'remessas')).join('')}
     ${pe.direta?kpi(un(pe.direta),'Rota direta (DHL / etiquetas)','remessas'):''}${ti.a?kpi(un(ti.a)+' un. · '+alf.length+' remessa(s)','Na alfândega','remessas'):''}
-    ${porWh.map(x=>kpi(un(x.l),'Warehouse '+esc(x.w.nome)+(x.r?' · '+un(x.r)+' reservado':''),'brasil')).join('')}
+    ${porWh.map(x=>kpi(un(x.l),'Estoque Brasil · '+esc(x.w.nome)+(x.r?' · '+un(x.r)+' reservado':''),'brasil')).join('')}
     ${kpi(un(tf),'Em trânsito para o Full','full')}${kpi(un(nf),'Confirmado no Full','full')}
     ${Object.entries(contas).map(([k,v])=>kpi(un(v),'No Full · '+esc(k),'full')).join('')}</div>
   ${fin}${apo}
