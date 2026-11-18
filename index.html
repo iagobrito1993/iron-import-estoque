@@ -166,6 +166,7 @@ tr.clk{cursor:pointer}tr.clk:hover td{background:#fafafa}
 .planilha tr.tot td{font-weight:700;background:#f7f7f7}
 .modal{max-width:860px}
 @media (max-width:560px){.modal{padding:14px}.planilha th,.planilha td{padding:6px 7px}}
+.iamic{position:absolute;right:8px;bottom:10px;width:28px;height:28px;min-height:0;padding:0;border:0;background:transparent;color:#9a9a9a;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:none}.iamic:hover{color:#111;background:#f2f2f2}.iamic.on{color:#fff;background:#111;animation:iapulse 1.2s ease-in-out infinite}@keyframes iapulse{0%,100%{box-shadow:0 0 0 0 rgba(0,0,0,.25)}50%{box-shadow:0 0 0 6px rgba(0,0,0,0)}}
 </style>
 </head>
 <body>
@@ -447,17 +448,17 @@ function modalIA(){reabrir=null;
   abrir(`<div style="display:flex;flex-direction:column;height:min(78vh,720px)"><h2 style="margin-bottom:4px">🤖 Assistente</h2>
   <div class="sub" style="margin-bottom:8px">Pergunte sobre estoque, compras, remessas, etapas e despachos.</div>
   <div id="ia_hist" style="flex:1;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:8px;min-height:120px">${IA_HIST.length?IA_HIST.map(h=>`<div class="item"><b>Você:</b> ${esc(h.q)}<div style="margin-top:6px;white-space:pre-wrap">${esc(h.r).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/^- /gm,'• ')}</div></div>`).join(''):'<div class="meta">Exemplos: "quanto tenho do produto X no depósito?" · "quais remessas estão no Paraguai?" · "quais despachos da conta Y saíram hoje?"</div>'}</div>
-  <div style="display:flex;gap:8px;margin-top:10px;align-items:flex-end"><textarea id="ia_q" rows="2" placeholder="Escreva sua pergunta e aperte Enter, ou toque no 🎤 e fale…" style="flex:1"></textarea>
-   <button id="ia_mic" type="button" title="Perguntar falando">🎤</button><button class="primary" id="ok">Perguntar</button><button id="cx">Fechar</button></div><div class="erro"></div></div>`);
+  <div style="display:flex;gap:8px;margin-top:10px;align-items:flex-end"><div style="flex:1;position:relative"><textarea id="ia_q" rows="2" placeholder="Escreva ou fale sua pergunta…" style="width:100%;padding-right:40px"></textarea>
+   <button id="ia_mic" class="iamic" type="button" title="Perguntar falando" aria-label="Perguntar falando"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button></div><button class="primary" id="ok">Perguntar</button><button id="cx">Fechar</button></div><div class="erro"></div></div>`);
   const hb=$('ia_hist');hb.scrollTop=hb.scrollHeight;
   $('ia_mic').onclick=()=>{const SR=window.SpeechRecognition||window.webkitSpeechRecognition;const mic=$('ia_mic'),cx=$('ia_q');
     if(!SR){toast('Este navegador não aceita voz. Use o Chrome (no computador ou no Android).');return;}
     if(window.__iaRec){window.__iaRec.stop();return;}
     const rec=new SR();window.__iaRec=rec;rec.lang='pt-BR';rec.interimResults=true;rec.continuous=false;let final='';
-    mic.textContent='⏺ Ouvindo…';mic.classList.add('primary');cx.placeholder='Pode falar…';
+    mic.classList.add('on');cx.placeholder='Ouvindo… pode falar';
     rec.onresult=e=>{let txt='';for(const r of e.results){txt+=r[0].transcript;if(r.isFinal)final=txt;}cx.value=txt;};
     rec.onerror=e=>{toast(e.error==='not-allowed'?'Libere o microfone para este site (ícone do cadeado ao lado do endereço).':'Não entendi. Tente de novo.');};
-    rec.onend=()=>{window.__iaRec=null;mic.textContent='🎤';mic.classList.remove('primary');cx.placeholder='Escreva sua pergunta e aperte Enter, ou toque no 🎤 e fale…';
+    rec.onend=()=>{window.__iaRec=null;mic.classList.remove('on');cx.placeholder='Escreva ou fale sua pergunta…';
       if((final||cx.value).trim()){cx.value=(final||cx.value).trim();$('ok').click();}};
     rec.start();};
   $('cx').onclick=fechar;const q=$('ia_q');q.focus();q.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('ok').click();}});
