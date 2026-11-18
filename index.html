@@ -360,7 +360,7 @@ function sel(t,q,o={}){let r=sb.from(t).select(q||'*').order(o.c||'id',{ascendin
 async function carregar(){
   if(carregando)return;carregando=true;
   try{
-    const envSel=C_ENV+', remessa_etapas('+C_ETAPA+'), envios_custo(frete,imposto,frete_unit,cotacao,custos_lancados), remessa_volumes(*), alfandega_eventos('+C_ALF+'), envio_itens(id,produto_id,qtd_enviada,qtd_recebida,qtd_divergencia,qtd_baixada, remessa_lotes(qtd,compra_id), envio_itens_custo(custo_medio_saida,custo_usd_saida,frete_unit,imposto_unit,custo_br,do_estoque_eua), encaminhamentos(id,qtd,destino,conta,envio,data,obs,criado_por,criado_em))';
+    const envSel=C_ENV+', remessa_etapas('+C_ETAPA+'), envios_custo(frete,imposto,frete_unit,cotacao,custos_lancados,valor_pago_brl), remessa_volumes(*), alfandega_eventos('+C_ALF+'), envio_itens(id,produto_id,qtd_enviada,qtd_recebida,qtd_divergencia,qtd_baixada, remessa_lotes(qtd,compra_id), envio_itens_custo(custo_medio_saida,custo_usd_saida,frete_unit,imposto_unit,custo_br,do_estoque_eua), encaminhamentos(id,qtd,destino,conta,envio,data,obs,criado_por,criado_em))';
     const R={produtos:sb.from('produtos').select('id,nome,sku,ean,upc,variacao,codigo_caixa,un_por_caixa,foto_url,produtos_custo(qtd_eua,qtd_reservada_eua)').order('nome'),
       envios:sel('envios',envSel,{lim:600}),perfis:sb.from('perfis').select('*').order('nome'),
       warehouses:sel('warehouses','*',{asc:true}),participantes:sel('participantes','*',{c:'nome',asc:true}),contas:sel('contas','*',{c:'nome',asc:true}),
@@ -566,7 +566,7 @@ function abaPainel(){
   if(tem('ver_aportes')){const t=totaisParticipantes();
     apo=`<h3>Aportes por participante</h3><div class="resumo">${t.length?t.map(x=>kpi(Object.entries(x.ap).map(([m,v])=>moeda(v,m)).join(' + ')||'—',esc(x.nome)+' · aportes de capital','aportes')).join(''):kpi('—','Nenhum aporte lançado','aportes')}</div>`;}
   const cotKpi=COT&&COT.v>0?kpi('R$ '+String(COT.v.toFixed(4)).replace('.',','),'Dólar comercial · '+new Date(COT.t).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+' · '+COT.fonte):'';
-  return `<div class="resumo" style="margin-top:12px">${cotKpi}
+  return `<div class="resumo" style="margin-top:12px">
     ${kpi(un(peds.filter(p=>p.status==='pendente').length)+' / '+un(peds.filter(p=>p.status==='parcial').length),'Compras pendentes / parcialmente recebidas','receb')}
     ${kpi(un(pendUn),'Unidades compradas a receber','receb')}
 </div>
@@ -655,7 +655,7 @@ function modalProduto(pid){
   <div>${p.foto_url?`<img class="fotog" src="${esc(p.foto_url)}" alt="" id="pf_img" style="cursor:zoom-in">`:`<div class="fotovazia"><div class="ic ph">📷</div>Este produto ainda não tem foto.</div>`}</div>
   ${podeFoto()?`<input id="pf_arq" type="file" accept="image/*" class="hidden"><div class="rodape" style="justify-content:flex-start;margin-top:10px"><button class="primary" id="pf_tirar">${p.foto_url?'Trocar foto':'Anexar foto'}</button>${p.foto_url?'<button class="danger" id="pf_rem">Remover foto</button>':''}</div>`:''}
   <div class="resumo" style="margin-top:14px">${kpi(un(c.qtd_eua),'Disponível EUA')}${kpi(un(c.qtd_reservada_eua),'Reservado EUA')}${kpi(un(ti.t),'Trânsito internacional')}${kpi(un(ti.a),'Na alfândega')}
-   ${kpi(un(b),'Warehouse Brasil')}${kpi(un(tf),'Indo para o Full')}${kpi(un(nf),'Confirmado no Full')}${verCusto()?kpi(usd(c.custo_medio_usd),'Custo médio · '+brl(c.custo_medio)):''}</div>
+   ${kpi(un(b),'Warehouse Brasil')}${kpi(un(tf),'Indo para o Full')}${kpi(un(nf),'Confirmado no Full')}${verCusto()?kpi(usd(c.custo_medio_usd),'Custo médio nos EUA (US$)'):''}</div>
   <h3>Rastreabilidade</h3>
   ${verCusto()&&ent.length?`<div class="meta" style="margin-bottom:4px"><b>Entradas no estoque EUA</b></div><div class="scroll"><table class="planilha"><tr><th>Data</th><th>Origem</th><th class="n">Qtd</th><th class="n">US$</th></tr>${ent.map(e=>`<tr><td>${fd(e.data)}</td><td>${esc(e.obs||e.loja||'Compra')}</td><td class="n">${un(e.qtd)}</td><td class="n">${usd(e.custo_usd,4)}</td></tr>`).join('')}</table></div>`:''}
   ${rems.length?`<div class="meta" style="margin-bottom:4px"><b>Remessas DHL / Aladin</b></div><div class="scroll"><table class="planilha"><tr><th>Remessa</th><th>Situação</th><th class="n">Enviado</th><th class="n">Recebido BR</th><th>Origem do lote</th></tr>${rems.slice(0,15).map(({r,i})=>`<tr><td>#${r.id} ${esc(r.transportadora)}</td><td>${(ST_REM[r.status]||[r.status])[0]}</td><td class="n">${un(i.qtd_enviada)}</td><td class="n">${un(i.qtd_recebida)}</td><td>${(i.remessa_lotes||[]).map(l=>esc(origemLote(l))+': '+un(l.qtd)).join(' · ')||'—'}</td></tr>`).join('')}</table></div>`:''}
@@ -712,7 +712,7 @@ function abaEUA(){
   const ch=`<div class="chips" style="margin:10px 0">${chip(filtroEUA,'estoque','Estoque','feua')}${verCusto()?chip(filtroEUA,'entradas','Entradas (histórico)','feua'):''}${chip(filtroEUA,'ajustes','Ajustes','feua')}</div>`;
   if(filtroEUA==='entradas'){const lst=(D.compras||[]).filter(e=>bate(nomeP(e.produto_id),e.loja,e.obs));
     return barraBusca('Buscar produto, loja…')+ch+`<div class="lista">${lst.length?lst.map(e=>{const p=produto(e.produto_id);return `<div class="card"><div class="pinfo">${foto(p,1)}<div><div class="t">${esc(p.nome)}</div>
-      <div class="meta">${fd(e.data)} · ${esc(e.obs||e.loja||'')}${e.origem==='legado'?' · lançamento anterior':''} · ${usd(e.custo_usd,4)} × ${numBR(e.cotacao)} = <b>${brl(e.custo_unit,4)}</b></div>
+      <div class="meta">${fd(e.data)} · ${esc(e.obs||e.loja||'')}${e.origem==='legado'?' · lançamento anterior':''} · <b>${usd(e.custo_usd,4)}</b> por unidade</div>
       <div class="meta">${nomeDe(e.criado_por)?'Lançado por '+esc(nomeDe(e.criado_por))+' · ':''}${fts(e.criado_em)}${e.qtd_alocada?' · '+un(e.qtd_alocada)+' un. já em remessa':''}</div></div></div>
       <div class="dir"><div class="n">+${un(e.qtd)} un.</div></div></div>`;}).join(''):'<div class="vazio">Nenhuma entrada.</div>'}</div>`;}
   if(filtroEUA==='ajustes'){return ch+`<div class="lista">${D.ajustes.filter(a=>a.local==='EUA').map(a=>`<div class="card"><div><div class="t">${esc(nomeP(a.produto_id))}</div><div class="meta">${fts(a.criado_em)} · ${esc(nomeDe(a.criado_por))} · ${esc(a.motivo)}</div></div><div class="dir"><div class="n">${a.delta>0?'+':''}${un(a.delta)} un.</div></div></div>`).join('')||'<div class="vazio">Nenhum ajuste registrado.</div>'}</div>`;}
@@ -720,9 +720,9 @@ function abaEUA(){
   const ce=lst.filter(p=>p.c.qtd_eua>0);
   const tu=ce.reduce((s,p)=>s+p.c.qtd_eua,0),tr=lst.reduce((s,p)=>s+p.c.qtd_reservada_eua,0),tv=ce.reduce((s,p)=>s+p.c.qtd_eua*p.c.custo_medio,0),tvu=ce.reduce((s,p)=>s+p.c.qtd_eua*p.c.custo_medio_usd,0);
   return barraBusca('Buscar produto ou código…',tem('remessas')?'<button class="primary" data-act="remessa">+ Nova remessa</button>':'')+ch+
-  `<div class="resumo">${kpi(un(tu),'Disponível nos EUA')}${kpi(un(tr),'Reservado em remessas')}${verCusto()?kpi(usd(tvu),'Valor em dólar')+kpi(brl(tv),'Valor a custo médio (R$)'):''}</div>
+  `<div class="resumo">${kpi(un(tu),'Disponível nos EUA')}${kpi(un(tr),'Reservado em remessas')}${verCusto()?kpi(usd(tvu),'Valor em dólar (custo médio)'):''}</div>
   <div class="lista">${lst.map(p=>`<div class="card click" data-prod="${p.id}" style="${p.c.qtd_eua+p.c.qtd_reservada_eua>0?'':'opacity:.55'}"><div class="pinfo">${foto(p)}<div><div class="t">${esc(p.nome)}</div>
-    <div class="meta">${p.sku?'SKU '+esc(p.sku)+' · ':''}${p.c.qtd_reservada_eua?'<b>'+un(p.c.qtd_reservada_eua)+'</b> reservado · ':''}${verCusto()?`Custo médio <b>${usd(p.c.custo_medio_usd,4)}</b> · <b>${brl(p.c.custo_medio,4)}</b>`:''}</div></div></div>
+    <div class="meta">${p.sku?'SKU '+esc(p.sku)+' · ':''}${p.c.qtd_reservada_eua?'<b>'+un(p.c.qtd_reservada_eua)+'</b> reservado · ':''}${verCusto()?`Custo médio <b>${usd(p.c.custo_medio_usd,4)}</b>`:''}</div></div></div>
     <div class="dir"><div class="n">${un(p.c.qtd_eua)} un.</div><div class="meta">disponível</div></div></div>`).join('')||'<div class="vazio">Nenhum produto.</div>'}</div>`;
 }
 
@@ -818,9 +818,8 @@ function modalPedido(id){
   <div class="tres"><div class="campo"><label>Data da compra</label><input id="pd_d" type="date" value="${v('data',hoje())}" ${temRec?'disabled':''}></div>
    <div class="campo"><label>Previsão de entrega</label><input id="pd_pv" type="date" value="${v('previsao')}"></div>
    <div class="campo"><label>Moeda da compra</label><select id="pd_m" ${temRec?'disabled':''}>${MOEDAS.map(m=>`<option ${(ed?ed.moeda:'USD')===m?'selected':''}>${m}</option>`).join('')}</select></div></div>
-  <div class="tres"><div class="campo"><label>Cotação do dólar (R$)</label><input id="pd_cu" inputmode="decimal" value="${ed?numBR(ed.cotacao_usd):esc(cotDolar())}" ${temRec?'disabled':''}></div>
-   <div class="campo" id="c_cm"><label>Cotação da moeda (R$)</label><input id="pd_cm" inputmode="decimal" value="${ed&&!['USD','BRL'].includes(ed.moeda)?numBR(ed.cotacao_brl):''}" ${temRec?'disabled':''}></div>
-   <div class="campo"><label>Data da cotação</label><input id="pd_dc" type="date" value="${v('data_cotacao',hoje())}" ${temRec?'disabled':''}></div></div>
+  <input type="hidden" id="pd_cu" value="${ed?numBR(ed.cotacao_usd):esc(cotDolar())}"><div id="c_cm" class="hidden"><input type="hidden" id="pd_cm" value="${ed&&!['USD','BRL'].includes(ed.moeda)?numBR(ed.cotacao_brl):''}"></div><input type="hidden" id="pd_dc" value="${v('data_cotacao',hoje())}">
+  <div class="meta" style="margin:-4px 0 8px">Lance os valores em dólar exatamente como estão na nota e anexe a nota. A conversão para reais é feita no <b>fechamento em reais</b> de cada remessa.</div>
   <h3>Produtos</h3>${temRec?'':scanHtml('Bipe um produto para incluir na compra')}
   <datalist id="dl_prod">${D.produtos.map(p=>`<option value="${esc(p.nome+(p.sku?' · '+p.sku:''))}">`).join('')}</datalist>
   <div class="scroll"><table class="planilha rateio" id="pd_tab"><tr><th>Produto</th><th>Variação</th><th>Embalagem</th><th class="n">Qtd (un.)</th><th class="n">Valor un.</th><th class="n">Desconto</th><th class="n">Total</th><th class="n">Custo final un.</th><th></th></tr></table></div>
@@ -852,7 +851,7 @@ function modalPedido(id){
       g('info').textContent=x.p?(x.p.variacao?'Variação '+x.p.variacao:''):(x.prod.trim()?'Produto novo — será cadastrado':'');
       g('qinfo').textContent=x.embalagem==='caixa'&&x.un_por_emb>1&&x.qtd?(x.qtd/x.un_por_emb).toLocaleString('pt-BR',{maximumFractionDigits:2})+' cx':'';
       g('tot').textContent=x.qtd?moeda(linha,m):'';g('cf').innerHTML=x.qtd?'<b>'+moeda((linha+sh)/x.qtd,m,4)+'</b>'+(m!=='USD'&&cu>0&&!isNaN(fator)?'<div class="meta">'+usd(fator*(linha+sh)/x.qtd,4)+'</div>':''):'';});
-    $('pd_tot').innerHTML=`Subtotal <b>${moeda(sub,m)}</b> − desconto ${moeda(de,m)} + impostos ${moeda(im,m)} + frete ${moeda(fr,m)} = <b>Total ${moeda(sub+extra,m)}</b>${m!=='BRL'&&cm>0?' · '+brl((sub+extra)*cm):''}<br><span class="meta">Desconto, impostos e frete são rateados pelo valor de cada produto para chegar ao custo final por unidade.</span>`;};
+    $('pd_tot').innerHTML=`Subtotal <b>${moeda(sub,m)}</b> − desconto ${moeda(de,m)} + impostos ${moeda(im,m)} + frete ${moeda(fr,m)} = <b>Total ${moeda(sub+extra,m)}</b><br><span class="meta">Desconto, impostos e frete são rateados pelo valor de cada produto para chegar ao custo final por unidade.</span>`;};
   desenhar();
   M.addEventListener('input',e=>{if(e.target.closest('#pd_tab')||['pd_de','pd_im','pd_fr','pd_cu','pd_cm'].includes(e.target.id))calc();});
   M.addEventListener('change',e=>{if(e.target.closest('#pd_tab')||e.target.id==='pd_m')calc();});
@@ -902,7 +901,7 @@ function modalPedidoDet(id){
   abrir(`<h2>Compra #${p.id} · ${esc(p.fornecedor)} ${bdg(ST_PED,p.status)}</h2>
   <div class="sub">${p.numero?'Pedido nº <b>'+esc(p.numero)+'</b> · ':''}${fd(p.data)}${p.previsao?' · previsão '+fd(p.previsao):''}${p.responsavel?' · responsável '+esc(p.responsavel):''}${p.motivo_status?'<br>'+esc(ST_PED[p.status][0])+': '+esc(p.motivo_status):''}${p.obs?'<br>Obs.: '+esc(p.obs):''}</div>
   <div class="resumo">${kpi(un(t.q),'Comprado (un.)')}${kpi(un(t.a),'Recebido e aprovado')}${kpi(un(t.pend),'Pendente')}${kpi(numBR(p.perc_recebido)+'%','Recebimento')}</div>${barra(p.perc_recebido)}
-  ${verCusto()?`<div class="total">Subtotal ${moeda(p.subtotal,p.moeda)} − desconto ${moeda(p.desconto,p.moeda)} + impostos ${moeda(p.impostos,p.moeda)} + frete ${moeda(p.frete,p.moeda)} = <b>${moeda(p.total,p.moeda)}</b>${p.moeda!=='BRL'?' ('+brl(p.total*p.cotacao_brl)+')':''} · dólar ${numBR(p.cotacao_usd)} em ${fd(p.data_cotacao)}
+  ${verCusto()?`<div class="total">Subtotal ${moeda(p.subtotal,p.moeda)} − desconto ${moeda(p.desconto,p.moeda)} + impostos ${moeda(p.impostos,p.moeda)} + frete ${moeda(p.frete,p.moeda)} = <b>${moeda(p.total,p.moeda)}</b>
     <br>Pago por <b>${esc(p.pago_por||'—')}</b> · conta ${esc(p.conta_origem||'—')} · ${esc(p.forma_pagamento||'—')} · ${p.situacao_pagamento==='pendente'?'<b>A pagar</b>':'Pago'}</div>`:''}
   <h3>Produtos</h3>${tabelaItensPedido(p,verCusto())}
   <h3>Entregas recebidas</h3>${historicoReceb(id)}
@@ -996,7 +995,7 @@ function cardRemessa(r,botao){const t=totRem(r),c=um(r.envios_custo);
    <div class="meta">${esc(r.origem||'EUA')} → ${esc(r.destino||'Brasil')} · ${r.status==='preparacao'?'saída prevista':'saída'} ${fd(r.data_saida)}${r.previsao?' · chegada prevista '+fd(r.previsao):''}${r.rastreio?' · rastreio '+linkRastreio(r):''}${r.caixas?' · '+un(r.caixas)+' volume(s)':''}${r.peso_kg?' · '+numBR(r.peso_kg)+' kg':''}</div>${passos(r)}
    ${['parcial','recebido'].includes(r.status)?`<div class="meta">Conferido no warehouse <b>${un(t.rec)}</b> de ${un(t.env)}${t.pend?' · pendente '+un(t.pend):''}${t.div?' · <b>'+un(t.div)+' com ocorrência</b>':''}</div>`:''}
    ${r.status==='recebido'&&r.encerrado_motivo?'<div class="warn">Encerrada com falta: '+esc(r.encerrado_motivo)+'</div>':''}
-   ${c&&verCusto()&&['parcial','recebido'].includes(r.status)&&!c.custos_lancados?'<div class="warn">⚠ Preço de custo a lançar</div>':''}</div>
+   ${c&&verCusto()&&['parcial','recebido'].includes(r.status)&&!c.custos_lancados?'<div class="warn">⚠ Fechamento em R$ pendente</div>':''}</div>
    <div class="dir"><div class="n">${un(t.env)} un.</div>${botao||'<button class="small">Abrir</button>'}</div></div>`;}
 function abaRemessas(){
   const f={prep:r=>r.status==='preparacao',abertas:r=>aCaminho(r.status),alf:r=>NA_ALF.includes(r.status),parc:r=>r.status==='parcial',rec:r=>r.status==='recebido',canc:r=>r.status==='cancelado',todos:()=>true}[filtroRem];
@@ -1103,7 +1102,7 @@ function modalDetalhe(id){log('abriu','Remessa #'+id);
   const it=itensEnv(r),c=um(r.envios_custo),t=totRem(r);
   const origemLote=l=>{if(!l.compra_id)return 'estoque anterior';const e=(D.compras||[]).find(x=>x.id===l.compra_id);if(!e)return 'entrada #'+l.compra_id;const pi=D.pedidos.flatMap(x=>x.pedido_itens||[]).find(x=>x.id===e.pedido_item_id);return pi?'compra #'+pi.pedido_id:esc(e.loja||'entrada #'+e.id);};
   const linhas=it.map(i=>{const p=produto(i.produto_id);
-    const custo=i.custo&&verCusto()?(+i.custo.custo_medio_saida<=0?`<div class="meta">Preço de custo a lançar</div>`:`<div class="meta">Custo ${brl(i.custo.custo_medio_saida,4)} (${usd(i.custo.custo_usd_saida,4)}) + frete ${brl(i.custo.frete_unit,4)} + imposto ${brl(i.custo.imposto_unit,4)} = <b>custo final ${brl(i.custo.custo_br,2)}</b></div>`):'';
+    const custo=i.custo&&verCusto()?(+i.custo.custo_medio_saida<=0?`<div class="meta">Custo em R$ pendente (fechamento da remessa)</div>`:`<div class="meta">Custo ${brl(i.custo.custo_medio_saida,4)} (${usd(i.custo.custo_usd_saida,4)}) + frete ${brl(i.custo.frete_unit,4)} + imposto ${brl(i.custo.imposto_unit,4)} = <b>custo final ${brl(i.custo.custo_br,2)}</b></div>`):'';
     return `<div class="item"><div class="pinfo" style="align-items:flex-start"><span data-zoom="${esc(p.foto_url||'')}">${foto(p,1)}</span><div><b>${esc(p.nome)}</b>${p.sku?' <span class="meta">'+esc(p.sku)+'</span>':''}
       <div class="meta">Enviado <b>${un(i.qtd_enviada)}</b>${['parcial','recebido'].includes(r.status)?` · conferido no warehouse <b>${un(i.qtd_recebida)}</b>${i.qtd_divergencia?' · <b>'+un(i.qtd_divergencia)+' com ocorrência</b>':''}${i.qtd_baixada?' · '+un(i.qtd_baixada)+' baixado':''} · pendente ${un(i.pend)}`:''}</div>
       ${(i.remessa_lotes||[]).length?`<div class="meta">Origem: ${(i.remessa_lotes||[]).map(l=>origemLote(l)+' ('+un(l.qtd)+')').join(' · ')}</div>`:''}${custo}</div></div></div>`;}).join('');
@@ -1115,7 +1114,7 @@ function modalDetalhe(id){log('abriu','Remessa #'+id);
   <div class="sub">${esc(r.origem||'EUA')} → ${esc(r.destino||'Brasil')} · ${r.status==='preparacao'?'envio previsto':'saída'} ${fd(r.data_saida)}${r.previsao?' · chegada prevista '+fd(r.previsao):''}${r.rastreio?' · rastreio '+linkRastreio(r):' · <b>sem rastreio</b>'} · ${un(t.env)} un.${r.responsavel?' · responsável '+esc(r.responsavel):''}${nomeDe(r.criado_por)?' · criada por '+esc(nomeDe(r.criado_por)):''}
   ${r.saida_em?'<br>Saída confirmada '+fts(r.saida_em)+' por '+esc(nomeDe(r.saida_por)):''}${r.obs?'<br>Obs.: '+esc(r.obs):''}${r.encerrado_motivo?'<br>'+(r.status==='cancelado'?'Cancelada':'Encerrada')+': '+esc(r.encerrado_motivo):''}</div>${passos(r)}
   ${verCusto()?`<div class="total">Despesas da remessa: frete ${moeda(r.frete_transp,r.moeda_despesas)} · seguro ${moeda(r.seguro,r.moeda_despesas)} · demais ${moeda(r.despesas,r.moeda_despesas)}${alf.some(a=>+a.imposto+ +a.taxas>0)?' · alfândega: impostos '+brl(alf.reduce((s,a)=>s+ +a.imposto,0))+' + taxas '+brl(alf.reduce((s,a)=>s+ +a.taxas,0)):''}
-   ${c?`<br>Rateio no custo: ${c.custos_lancados||+c.frete||+c.imposto?`frete <b>${brl(c.frete)}</b> · imposto <b>${brl(c.imposto)}</b>${c.cotacao?' · dólar '+numBR(c.cotacao):''}`:'ainda não lançado'}${podeCusto()&&r.status!=='cancelado'&&!(ehSocio()&&c.custos_lancados)?` · <button class="link" id="custos">${c.custos_lancados?'Alterar preço de custo':'Lançar preço de custo'}</button>`:''}`:''}</div>`:''}
+   ${c?`<br>Fechamento em R$: ${c.custos_lancados?`${+c.valor_pago_brl>0?'pago <b>'+brl(c.valor_pago_brl)+'</b> · ':''}dólar efetivo <b>${numBR(+(+c.cotacao).toFixed(4))}</b> · fretes <b>${brl(c.frete)}</b> · impostos <b>${brl(c.imposto)}</b>`:'<b>pendente</b>'}${podeCusto()&&r.status!=='cancelado'&&!(ehSocio()&&c.custos_lancados)?` · <button class="link" id="custos">${c.custos_lancados?'Alterar fechamento':'Lançar fechamento em R$'}</button>`:''}`:''}</div>`:''}
   ${rotaPY(r)?blocoEtapas(r):''}
   <h3>Produtos</h3>${linhas}
   ${vols.length?`<h3>Caixas / volumes</h3><div class="scroll"><table class="planilha"><tr><th>Caixa</th><th class="n">Peso</th><th>Medidas (cm)</th><th>Itens</th></tr>${vols.map(v=>`<tr><td>${v.numero}</td><td class="n">${v.peso_kg?numBR(v.peso_kg)+' kg':'—'}</td><td>${v.comp_cm?numBR(v.comp_cm)+' × '+numBR(v.larg_cm)+' × '+numBR(v.alt_cm):'—'}</td><td>${(v.itens||[]).map(x=>esc(nomeP(x.produto_id))+' '+un(x.qtd)).join('<br>')||'—'}</td></tr>`).join('')}</table></div>`:''}
@@ -1208,47 +1207,55 @@ function modalChegada(rid){
 }
 
 // ---------- preço de custo na entrada (rateio de frete e imposto) ----------
+function totUSDRem(r,qtdFn){return itensEnv(r).reduce((s,i)=>s+qtdFn(i)*(i.custo&&+i.custo.custo_usd_saida||0),0);}
 function blocoCustos(r){
   const c=um(r.envios_custo)||{},it=itensEnv(r),br=v=>String(+v).replace('.',',');
-  const cot=c.cotacao?br(c.cotacao):cotPadrao();
-  return `<h3>Preço de custo</h3>
-  <div class="tres"><div class="campo"><label>Cotação do dólar (R$)</label><input id="k_cot" inputmode="decimal" placeholder="5,40" value="${esc(cot)}"></div>
-  <div class="campo"><label>Frete total (R$)</label><input id="k_fr" inputmode="decimal" placeholder="0,00" value="${+c.frete?br(c.frete):custoEtapasBRL(r)>0?br(custoEtapasBRL(r)):''}">${custoEtapasBRL(r)>0?'<div class="meta">Fretes da rota (Aladin + freteiro + SP): '+brl(custoEtapasBRL(r))+'</div>':''}</div>
-  <div class="campo"><label>Imposto total (R$)</label><input id="k_im" inputmode="decimal" placeholder="0,00" value="${+c.imposto?br(c.imposto):''}"></div></div>
-  <div class="scroll"><table class="planilha rateio"><tr><th>Produto</th><th class="n">Qtd</th><th class="n">Custo un. US$</th><th class="n">Custo R$</th><th class="n">+ Frete</th><th class="n">+ Imposto</th><th class="n">Custo final un.</th><th class="n">Total</th></tr>
+  const etp=custoEtapasBRL(r);
+  const vp=+c.valor_pago_brl>0?c.valor_pago_brl:(c.custos_lancados&&+c.cotacao>0?'':'');
+  return `<h3>Fechamento em reais</h3>
+  <div class="tres"><div class="campo"><label>Valor pago em R$ pela mercadoria</label><input id="k_vp" inputmode="decimal" placeholder="0,00" value="${vp?br(vp):''}"><div class="meta">O que saiu de fato da conta: câmbio com IOF, spread e taxas, PIX/TED ou acerto.</div></div>
+  <div class="campo"><label>Fretes em R$</label><input id="k_fr" inputmode="decimal" placeholder="0,00" value="${+c.frete?br(c.frete):etp>0?br(etp):''}">${etp>0?'<div class="meta">Fretes da rota (Aladin + freteiro + SP): '+brl(etp)+'</div>':''}</div>
+  <div class="campo"><label>Impostos e taxas em R$</label><input id="k_im" inputmode="decimal" placeholder="0,00" value="${+c.imposto?br(c.imposto):''}"></div></div>
+  <div class="total" id="k_efet"></div>
+  <div class="scroll"><table class="planilha rateio"><tr><th>Produto</th><th class="n">Qtd</th><th class="n">Custo un. US$</th><th class="n">Mercadoria R$</th><th class="n">+ Frete</th><th class="n">+ Imposto</th><th class="n">Custo final un.</th><th class="n">Total</th></tr>
   ${it.map(i=>`<tr><td>${esc(produto(i.produto_id).nome)}</td><td class="n" data-kq="${i.id}"></td><td class="n"><input data-ku="${i.id}" inputmode="decimal" placeholder="0,00" value="${i.custo&&+i.custo.custo_usd_saida?br(i.custo.custo_usd_saida):''}"></td>
     <td class="n" data-kb="${i.id}"></td><td class="n" data-kf="${i.id}"></td><td class="n" data-ki="${i.id}"></td><td class="n" data-kc="${i.id}"></td><td class="n" data-kt="${i.id}"></td></tr>`).join('')}
-  <tr class="tot"><td>Total</td><td class="n" id="k_tq"></td><td></td><td class="n" id="k_tb"></td><td class="n" id="k_tf"></td><td class="n" id="k_ti"></td><td></td><td class="n" id="k_tt"></td></tr></table></div>
-  <div class="meta">O frete é dividido por unidade que chegou. O imposto é dividido pelo valor de cada produto: o mais caro carrega mais imposto.</div>`;
+  <tr class="tot"><td>Total</td><td class="n" id="k_tq"></td><td class="n" id="k_tu"></td><td class="n" id="k_tb"></td><td class="n" id="k_tf"></td><td class="n" id="k_ti"></td><td></td><td class="n" id="k_tt"></td></tr></table></div>
+  <div class="meta">O custo em US$ vem das compras (notas). O valor pago em R$ é dividido pelo valor em dólar de cada produto, o frete por unidade e o imposto pelo valor de cada produto.</div>
+  <h3>Comprovantes do pagamento em R$</h3>${anexosHtml('fechamento',r.id,true)}${campoArquivos('k_arq','Contrato de câmbio, comprovante PIX/TED, recibos')}`;
 }
 function ligarCustos(r,qtdFn){
   const it=itensEnv(r),M=$('modal'),q_=s=>M.querySelector(s);
-  const calc=()=>{if(!$('k_cot'))return null;const k=dinheiro(val('k_cot')),fr=dinheiro(val('k_fr'))||0,im=dinheiro(val('k_im'))||0;
-    const L=it.map(i=>{const u=dinheiro(q_(`[data-ku="${i.id}"]`).value);return {id:i.id,q:qtdFn(i),u,b:isNaN(u)||isNaN(k)?NaN:u*k};});
-    const tq=L.reduce((s,x)=>s+x.q,0),tv=L.reduce((s,x)=>s+(isNaN(x.b)?0:x.q*x.b),0),fu=tq?fr/tq:0;let tb=0,tf=0,ti=0,tt=0;
+  const calc=()=>{if(!$('k_vp'))return null;const vp=dinheiro(val('k_vp')),fr=dinheiro(val('k_fr'))||0,im=dinheiro(val('k_im'))||0;
+    const L=it.map(i=>{const u=dinheiro(q_(`[data-ku="${i.id}"]`).value);return {id:i.id,q:qtdFn(i),u};});
+    const tq=L.reduce((s,x)=>s+x.q,0),tu=L.reduce((s,x)=>s+(isNaN(x.u)?0:x.q*x.u),0);
+    const k=vp>0&&tu>0?vp/tu:NaN;L.forEach(x=>x.b=isNaN(x.u)||isNaN(k)?NaN:x.u*k);
+    const tv=L.reduce((s,x)=>s+(isNaN(x.b)?0:x.q*x.b),0),fu=tq?fr/tq:0;let tb=0,tf=0,ti=0,tt=0;
     L.forEach(x=>{const iu=isNaN(x.b)?NaN:(tv>0?im*x.b/tv:(tq?im/tq:0)),fin=x.b+fu+iu;
       q_(`[data-kq="${x.id}"]`).textContent=un(x.q);q_(`[data-kb="${x.id}"]`).textContent=isNaN(x.b)?'—':brl(x.b);
       q_(`[data-kf="${x.id}"]`).textContent=brl(fu);q_(`[data-ki="${x.id}"]`).textContent=isNaN(iu)?'—':brl(iu);
       q_(`[data-kc="${x.id}"]`).innerHTML=isNaN(fin)?'—':'<b>'+brl(fin)+'</b>';q_(`[data-kt="${x.id}"]`).textContent=isNaN(fin)?'—':brl(fin*x.q);
       if(!isNaN(fin)){tb+=x.b*x.q;tf+=fu*x.q;ti+=iu*x.q;tt+=fin*x.q;}});
-    $('k_tq').textContent=un(tq);$('k_tb').textContent=brl(tb);$('k_tf').textContent=brl(tf);$('k_ti').textContent=brl(ti);$('k_tt').innerHTML='<b>'+brl(tt)+'</b>';
-    return {k,fr,im,L};};
+    $('k_tq').textContent=un(tq);$('k_tu').textContent=usd(tu);$('k_tb').textContent=brl(tb);$('k_tf').textContent=brl(tf);$('k_ti').textContent=brl(ti);$('k_tt').innerHTML='<b>'+brl(tt)+'</b>';
+    $('k_efet').innerHTML=isNaN(k)?'Informe o valor pago em R$ para o sistema calcular o <b>dólar efetivo</b> deste envio.':`Mercadoria ${usd(tu)} · pago ${brl(vp)} → <b>dólar efetivo R$ ${k.toLocaleString('pt-BR',{minimumFractionDigits:4,maximumFractionDigits:4})}</b> (já com IOF e taxas) · custo total do envio <b>${brl(tt)}</b>`;
+    return {k,vp,fr,im,L,tu};};
   $('kwrap').addEventListener('input',calc);calc();
-  return opcional=>{const {k,fr,im,L}=calc();
-    if(opcional&&L.every(x=>isNaN(x.u))&&!val('k_fr')&&!val('k_im'))return null;
-    if(isNaN(k)||k<=0)throw new Error('Informe a cotação do dólar.');
+  return opcional=>{const {k,vp,fr,im,L,tu}=calc();
+    if(opcional&&!(vp>0)&&!val('k_fr')&&!val('k_im'))return null;
     if(L.some(x=>isNaN(x.u)))throw new Error('Informe o custo unitário (US$) de todos os produtos.');
+    if(!(vp>0))throw new Error('Informe o valor pago em R$ pela mercadoria.');
+    if(!(tu>0))throw new Error('O total em US$ da mercadoria está zerado.');
     if(isNaN(dinheiro(val('k_fr')||'0'))||isNaN(dinheiro(val('k_im')||'0')))throw new Error('Valor de frete ou imposto inválido.');
-    gravarPref('iron_cotacao',val('k_cot'));
-    return {p_envio:r.id,p_cotacao:k,p_frete:fr,p_imposto:im,p_itens:L.map(x=>({item_id:x.id,custo_usd:x.u}))};};
+    return {vp,a:{p_envio:r.id,p_cotacao:+k.toFixed(6),p_frete:fr,p_imposto:im,p_itens:L.map(x=>({item_id:x.id,custo_usd:x.u}))}};};
 }
 function modalCustos(rid){
   const r=D.envios.find(x=>x.id===rid);if(!r)return;
-  abrir(`<h2>Preço de custo — Envio #${r.id}</h2><div class="sub">Lance o custo unitário de cada produto, o frete e o imposto. O sistema divide e calcula o custo final de cada produto.</div>
-  <div id="kwrap">${blocoCustos(r)}</div><div class="erro"></div><div class="rodape"><button id="cx">Voltar</button><button class="primary" id="ok">Salvar preço de custo</button></div>`);
+  abrir(`<h2>Fechamento em reais — Remessa #${r.id}</h2><div class="sub">Lance o que foi pago em reais por esta remessa. O sistema calcula o dólar efetivo (com IOF e taxas) e o custo final em R$ de cada produto.</div>
+  <div id="kwrap">${blocoCustos(r)}</div><div class="erro"></div><div class="rodape"><button id="cx">Voltar</button><button class="primary" id="ok">Salvar fechamento</button></div>`);
   const pegar=ligarCustos(r,i=>['recebido','parcial'].includes(r.status)?(i.qtd_recebida||0):i.qtd_enviada);
   $('cx').onclick=()=>modalDetalhe(rid);
-  $('ok').onclick=()=>rodar($('ok'),async()=>{const a=pegar(false);await rpc('lancar_custos_entrada',a);toast('Preço de custo lançado.');await carregar();modalDetalhe(rid);});
+  $('ok').onclick=()=>rodar($('ok'),async()=>{const {vp,a}=pegar(false);await rpc('lancar_custos_entrada',a);await rpc('salvar_valor_pago',{p_envio:rid,p_valor:vp});
+    const ax=await anexarDepois('fechamento',rid,'k_arq');toast('Fechamento lançado.'+ax);await carregar();modalDetalhe(rid);});
 }
 // ---------- WAREHOUSE BRASIL ----------
 let filtroWh='todos';
@@ -1409,7 +1416,7 @@ function ligarDivBotoes(volta){$('modal').querySelectorAll('[data-resdiv]').forE
 // ---------- GASTOS DA OPERAÇÃO ----------
 let fgMes=null,fgCat='',fgSit='';
 function custosModulos(mes){const out=[];const cot=+(String(cotDolar()).replace(',','.'))||5;
-  D.pedidos.filter(p=>p.status!=='cancelada'&&String(p.data).slice(0,7)===mes).forEach(p=>out.push({o:'Compra #'+p.id+' · '+p.fornecedor,cat:'Mercadorias',v:p.total*p.cotacao_brl,ref:['ped',p.id]}));
+  D.envios.filter(r=>r.status!=='cancelado'&&String(r.data_saida).slice(0,7)===mes).forEach(r=>{const c=um(r.envios_custo);if(c&&+c.valor_pago_brl>0)out.push({o:'Remessa #'+r.id+' · mercadoria (fechamento em R$)',cat:'Mercadorias',v:+c.valor_pago_brl,ref:['env',r.id]});});
   D.envios.filter(r=>r.status!=='cancelado'&&String(r.data_saida).slice(0,7)===mes).forEach(r=>{const k=r.moeda_despesas==='BRL'?1:(+um(r.envios_custo||[])?.cotacao||cot);const v=(+r.frete_transp+ +r.seguro+ +r.despesas)*k;if(v>0)out.push({o:'Remessa #'+r.id+' · frete/seguro/despesas',cat:'Frete internacional',v,ref:['env',r.id]});
     (r.alfandega_eventos||[]).forEach(a=>{const x=(+a.imposto+ +a.taxas)*(a.moeda==='BRL'?1:cot);if(x>0&&String(a.data).slice(0,7)===mes)out.push({o:'Remessa #'+r.id+' · alfândega',cat:'Impostos e taxas',v:x,ref:['env',r.id]});});});
   D.full.filter(f=>f.status!=='cancelado'&&+f.custo>0&&String(f.data_saida||f.criado_em).slice(0,7)===mes).forEach(f=>out.push({o:'Full #'+f.id,cat:'Transporte e entregas',v:+f.custo,ref:['full',f.id]}));
