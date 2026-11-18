@@ -444,10 +444,23 @@ async function iaChamar(body){const {data,error}=await sb.functions.invoke('ia',
 async function arquivoBase64(f){let b=f,tipo=f.type;if(/^image\//.test(f.type)){b=await reduzirImagem(f,2000);tipo='image/jpeg';}
   const buf=new Uint8Array(await b.arrayBuffer());let s='';for(let i=0;i<buf.length;i+=32768)s+=String.fromCharCode.apply(null,buf.subarray(i,i+32768));return {tipo,base64:btoa(s)};}
 let IA_HIST=[];
+// mostra a resposta da IA formatada (títulos, negrito, listas e tabelas)
+function mdIA(t){const inl=x=>esc(x).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>');const L=String(t||'').split('\n');let h='',i=0;
+  while(i<L.length){const l=L[i].trim();
+    if(/^\|.*\|$/.test(l)){const rows=[];while(i<L.length&&/^\|.*\|$/.test(L[i].trim())){rows.push(L[i].trim());i++;}
+      const cel=r=>r.slice(1,-1).split('|').map(c=>c.trim());const dados=rows.filter(r=>!/^\|[\s:|-]+\|$/.test(r));
+      h+='<div class="scroll"><table class="planilha" style="margin:6px 0">'+dados.map((r,k)=>'<tr>'+cel(r).map(c=>k===0?'<th>'+inl(c)+'</th>':'<td>'+inl(c)+'</td>').join('')+'</tr>').join('')+'</table></div>';continue;}
+    if(/^#{1,4}\s/.test(l))h+='<div style="font-weight:700;margin:10px 0 4px">'+inl(l.replace(/^#+\s*/,''))+'</div>';
+    else if(/^[-*•]\s/.test(l))h+='<div style="padding-left:12px">• '+inl(l.replace(/^[-*•]\s*/,''))+'</div>';
+    else if(/^\d+[.)]\s/.test(l))h+='<div style="padding-left:12px">'+inl(l)+'</div>';
+    else if(!l)h+='<div style="height:6px"></div>';
+    else h+='<div>'+inl(l)+'</div>';
+    i++;}
+  return h;}
 function modalIA(){reabrir=null;
   abrir(`<div style="display:flex;flex-direction:column;height:min(78vh,720px)"><h2 style="margin-bottom:4px">🤖 Assistente</h2>
   <div class="sub" style="margin-bottom:8px">Pergunte sobre estoque, compras, remessas, etapas e despachos.</div>
-  <div id="ia_hist" style="flex:1;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:8px;min-height:120px">${IA_HIST.length?IA_HIST.map(h=>`<div class="item"><b>Você:</b> ${esc(h.q)}<div style="margin-top:6px;white-space:pre-wrap">${esc(h.r).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/^- /gm,'• ')}</div></div>`).join(''):'<div class="meta">Exemplos: "quanto tenho do produto X no depósito?" · "quais remessas estão no Paraguai?" · "quais despachos da conta Y saíram hoje?"</div>'}</div>
+  <div id="ia_hist" style="flex:1;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:8px;min-height:120px">${IA_HIST.length?IA_HIST.map(h=>`<div class="item"><b>Você:</b> ${esc(h.q)}<div style="margin-top:6px">${mdIA(h.r)}</div></div>`).join(''):'<div class="meta">Exemplos: "quanto tenho do produto X no depósito?" · "quais remessas estão no Paraguai?" · "quais despachos da conta Y saíram hoje?"</div>'}</div>
   <div style="display:flex;gap:8px;margin-top:10px;align-items:flex-end"><div style="flex:1;position:relative"><textarea id="ia_q" rows="2" placeholder="Escreva ou fale sua pergunta…" style="width:100%;padding-right:40px"></textarea>
    <button id="ia_mic" class="iamic" type="button" title="Perguntar falando" aria-label="Perguntar falando"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button></div><button class="primary" id="ok">Perguntar</button><button id="cx">Fechar</button></div><div class="erro"></div></div>`);
   const hb=$('ia_hist');hb.scrollTop=hb.scrollHeight;
@@ -464,9 +477,9 @@ function modalIA(){reabrir=null;
   $('cx').onclick=fechar;const q=$('ia_q');q.focus();q.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('ok').click();}});
   $('ok').onclick=()=>rodar($('ok'),async()=>{const t=val('ia_q');if(!t)return;q.value='';
     const h={q:t,r:''};IA_HIST.push(h);const box=$('ia_hist');if(!box.querySelector('.item'))box.innerHTML='';
-    box.insertAdjacentHTML('beforeend',`<div class="item"><b>Você:</b> ${esc(t)}<div class="ia_r" style="margin-top:6px;white-space:pre-wrap"><span class="meta">Pensando…</span></div></div>`);
+    box.insertAdjacentHTML('beforeend',`<div class="item"><b>Você:</b> ${esc(t)}<div class="ia_r" style="margin-top:6px"><span class="meta">Pensando…</span></div></div>`);
     const alvo=box.lastElementChild.querySelector('.ia_r');box.scrollTop=box.scrollHeight;
-    const fmt=x=>esc(x).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/^- /gm,'• ');
+    const fmt=mdIA;
     const {data:{session}}=await sb.auth.getSession();
     const resp=await fetch(SUPABASE_URL+'/functions/v1/ia',{method:'POST',headers:{'Content-Type':'application/json',apikey:SUPABASE_KEY,Authorization:'Bearer '+(session?session.access_token:SUPABASE_KEY)},body:JSON.stringify({acao:'perguntar',pergunta:t})});
     if(!resp.ok||/json/.test(resp.headers.get('content-type')||'')){let m='Falha na IA';try{const j=await resp.json();m=j.erro||m;}catch(e){}IA_HIST.pop();alvo.innerHTML='<span class="warn">'+esc(m)+'</span>';throw new Error(m);}
