@@ -437,6 +437,19 @@ function anexosDe(ent,id){return D.anexos.filter(a=>a.entidade===ent&&a.entidade
 function anexosHtml(ent,id,pode=true){const l=anexosDe(ent,id);
   return `<div class="anx">${l.map(a=>`<span class="anxi"><button class="link" data-anx="${a.id}" type="button">📎 ${esc(a.nome||'arquivo')}</button>${ehAdmin()||a.criado_por===sessao.user.id?` <button class="link mut" data-anxdel="${a.id}" type="button">remover</button>`:''}</span>`).join('')||'<span class="meta">Nenhum anexo.</span>'}
   ${pode?`<label class="btnfile">📷 Escanear<input type="file" accept="image/*" capture="environment" data-anxup="${ent}:${id}" class="hidden"></label> <label class="btnfile">+ Anexar arquivo<input type="file" multiple data-anxup="${ent}:${id}" class="hidden"></label>`:''}</div>`;}
+async function iaChamar(body){const {data,error}=await sb.functions.invoke('ia',{body});
+  if(error){let m=error.message;try{const j=await error.context.json();if(j&&j.erro)m=j.erro;}catch(e){}throw new Error(m);}
+  if(data&&data.erro)throw new Error(data.erro);return data;}
+async function arquivoBase64(f){let b=f,tipo=f.type;if(/^image\//.test(f.type)){b=await reduzirImagem(f,2000);tipo='image/jpeg';}
+  const buf=new Uint8Array(await b.arrayBuffer());let s='';for(let i=0;i<buf.length;i+=32768)s+=String.fromCharCode.apply(null,buf.subarray(i,i+32768));return {tipo,base64:btoa(s)};}
+let IA_HIST=[];
+function modalIA(){reabrir=null;
+  abrir(`<h2>🤖 Assistente</h2><div class="sub">Pergunte sobre estoque, compras, remessas, etapas e despachos. Ex.: "quanto tenho do produto X no depósito?", "quais remessas estão no Paraguai?", "quais despachos da conta Y saíram hoje?"</div>
+  <div id="ia_hist" class="lista" style="max-height:50vh;overflow:auto">${IA_HIST.map(h=>`<div class="item"><b>Você:</b> ${esc(h.q)}<div style="margin-top:6px;white-space:pre-wrap">${esc(h.r)}</div></div>`).join('')}</div>
+  <div class="campo"><textarea id="ia_q" rows="2" placeholder="Escreva sua pergunta…" style="width:100%"></textarea></div>
+  <div class="erro"></div><div class="rodape"><button id="cx">Fechar</button><button class="primary" id="ok">Perguntar</button></div>`);
+  $('cx').onclick=fechar;const q=$('ia_q');q.focus();q.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('ok').click();}});
+  $('ok').onclick=()=>rodar($('ok'),async()=>{const t=val('ia_q');if(!t)return;const r=await iaChamar({acao:'perguntar',pergunta:t});IA_HIST.push({q:t,r:r.resposta||''});log('acao','Perguntou ao assistente');modalIA();});}
 function campoArquivos(id,rot){return `<div class="campo"><label>${rot||'Anexos (recibos, invoices, comprovantes, fotos)'} <span style="font-weight:400;color:var(--mut)">(opcional)</span></label>
   <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><label class="btnfile">📷 Escanear com a câmera<input id="${id}_cam" type="file" accept="image/*" capture="environment" multiple class="hidden" onchange="this.parentNode.firstChild.textContent='📷 '+this.files.length+' foto(s) prontas '"></label>
   <input id="${id}" type="file" multiple accept="image/*,application/pdf,.xls,.xlsx,.doc,.docx,.csv,.txt" style="flex:1;min-width:200px"></div></div>`;}
@@ -545,7 +558,7 @@ function render(){
   const ativo=document.activeElement&&document.activeElement.id==='busca';const pos=ativo?document.activeElement.selectionStart:0;
   $('app').innerHTML=`<div class="topo"><div class="wrap"><div class="marca">${logoHtml()}</div>
     <div class="quem"><span>${esc(perfil.nome||perfil.email)}</span><span class="badge b-pap">${PAPEIS[perfil.papel]}</span>
-    <button class="small" data-act="atualizar">Atualizar</button><button class="small" data-act="sair">Sair</button></div></div></div>
+    <button class="small" data-act="ia">🤖 Assistente</button><button class="small" data-act="atualizar">Atualizar</button><button class="small" data-act="sair">Sair</button></div></div></div>
     <div class="wrap"><nav class="abas">${abas.map(([k,l])=>`<button class="${aba===k?'on':''}" data-aba="${k}">${l}</button>`).join('')}</nav>${conteudo}</div>`;
   if(ativo){const b=$('busca');if(b){b.focus();b.setSelectionRange(pos,pos);}}
 }
@@ -842,7 +855,7 @@ function modalPedido(id){
    <div class="campo"><label>Forma de pagamento</label><select id="pd_fp"><option value="">—</option>${FORMAS.map(f=>`<option ${ed&&ed.forma_pagamento===f?'selected':''}>${f}</option>`).join('')}</select></div></div>
   <div class="duas"><div class="campo"><label>Situação do pagamento</label><select id="pd_sp"><option value="pago">Pago</option><option value="pendente" ${ed&&ed.situacao_pagamento==='pendente'?'selected':''}>A pagar</option></select></div>
    <div class="campo"><label>Observações</label><input id="pd_o" value="${v('obs')}"></div></div>
-  ${ed?'<h3>Anexos</h3>'+anexosHtml('pedido',ed.id):campoArquivos('pd_arq','Nota / invoice da compra e comprovantes de pagamento')}
+  ${ed?'<h3>Anexos</h3>'+anexosHtml('pedido',ed.id):campoArquivos('pd_arq','Nota / invoice da compra e comprovantes de pagamento')+'<button class="primary" id="pd_ia" type="button">🤖 Ler nota com IA e preencher a compra</button><div class="meta" id="pd_ia_info" style="margin-top:4px">Escaneie ou anexe a nota acima e toque no botão: a IA preenche fornecedor, nº, data, produtos, quantidades e valores. Confira antes de salvar.</div>'}
   <div class="erro"></div><div class="rodape"><button id="cx">Cancelar</button><button class="primary" id="ok">${ed?'Salvar alterações':'Salvar compra'}</button></div>`);
   reabrir=ed?()=>modalPedido(id):null;
   const tab=$('pd_tab'),M=$('modal');
@@ -861,6 +874,20 @@ function modalPedido(id){
       g('tot').textContent=x.qtd?moeda(linha,m):'';g('cf').innerHTML=x.qtd?'<b>'+moeda((linha+sh)/x.qtd,m,4)+'</b>'+(m!=='USD'&&cu>0&&!isNaN(fator)?'<div class="meta">'+usd(fator*(linha+sh)/x.qtd,4)+'</div>':''):'';});
     $('pd_tot').innerHTML=`Subtotal <b>${moeda(sub,m)}</b> − desconto ${moeda(de,m)} + impostos ${moeda(im,m)} + frete ${moeda(fr,m)} = <b>Total ${moeda(sub+extra,m)}</b><br><span class="meta">Desconto, impostos e frete são rateados pelo valor de cada produto para chegar ao custo final por unidade.</span>`;};
   desenhar();
+  if($('pd_ia'))$('pd_ia').onclick=()=>rodar($('pd_ia'),async()=>{
+    const f=[$('pd_arq_cam'),$('pd_arq')].flatMap(e=>e&&e.files?[...e.files]:[]).find(x=>/^image\/|pdf$/.test(x.type));
+    if(!f)throw new Error('Escaneie ou anexe a nota primeiro.');
+    $('pd_ia_info').textContent='Lendo a nota com IA… pode levar alguns segundos.';
+    const r=await iaChamar({acao:'ler_nota',arquivo:await arquivoBase64(f),produtos:D.produtos.map(p=>({id:p.id,nome:p.nome,sku:p.sku,ean:p.ean,upc:p.upc}))});
+    const n=r.nota||{};
+    if(n.fornecedor)$('pd_f').value=n.fornecedor;if(n.numero)$('pd_n').value=n.numero;if(/^\d{4}-\d\d-\d\d$/.test(n.data||''))$('pd_d').value=n.data;
+    if(n.moeda&&[...$('pd_m').options].some(o=>o.value===n.moeda))$('pd_m').value=n.moeda;
+    $('pd_de').value=numBR(+n.desconto||'');$('pd_im').value=numBR(+n.impostos||'');$('pd_fr').value=numBR(+n.frete||'');
+    const its=(n.itens||[]).filter(i=>+i.qtd>0);
+    if(its.length){L=its.map(i=>{const p=i.produto_id?D.produtos.find(x=>x.id===+i.produto_id):null;
+      return {prod:p?p.nome+(p.sku?' · '+p.sku:''):(i.descricao||''),sku:p?'':(i.codigo||''),qtd:+i.qtd,valor_unit:+i.valor_unit||'',desconto:+i.desconto||''};});desenhar();}
+    const novos=its.filter(i=>!i.produto_id).length;
+    $('pd_ia_info').innerHTML=`<b>Nota lida:</b> ${its.length} produto(s)${novos?' · <b>'+novos+' não encontrado(s) no cadastro</b> (serão cadastrados como novos — confira o nome)':''}${n.total?' · total da nota '+moeda(+n.total,n.moeda||'USD'):''}${n.observacao?'<br>Obs. da IA: '+esc(n.observacao):''}<br>Confira tudo antes de salvar.`;});
   M.addEventListener('input',e=>{if(e.target.closest('#pd_tab')||['pd_de','pd_im','pd_fr','pd_cu','pd_cm'].includes(e.target.id))calc();});
   M.addEventListener('change',e=>{if(e.target.closest('#pd_tab')||e.target.id==='pd_m')calc();});
   tab.addEventListener('click',e=>{const d=e.target.closest('[data-del]');if(!d)return;L=ler().map(x=>({...x,valor_unit:x.valor_unit||'',desconto:x.desconto||''}));L.splice(+d.dataset.del,1);if(!L.length)L=[{}];desenhar();});
@@ -1626,6 +1653,7 @@ $('app').addEventListener('click',async e=>{
   const a=d.act;
   if(a==='sair')sb.auth.signOut();
   if(a==='atualizar'){await carregar();toast('Atualizado.');}
+  if(a==='ia')modalIA();
   if(a==='pedido')modalPedido();
   if(a==='remessa')modalRemessa();
   if(a==='full')modalFullNovo();
