@@ -198,8 +198,11 @@ const RES_DIV={aprovar:'Aprovada',repor:'Reposição',baixar:'Baixada',devolver:
 const CATS=['Ajudantes e mão de obra','Aluguel','Embalagens','Transporte e entregas','Frete internacional','Impostos e taxas','Sistemas','Outras despesas'];
 const MOEDAS=['USD','BRL','EUR','PYG'];
 const MARKETS=['Mercado Livre','Amazon','Outro'];
-const FLEX='Mercado Livre Flex';
-function isFlex(f){return /flex/i.test((f&&f.marketplace)||'');}
+const FLEX='Mercado Livre Flex',AGENCIA='Mercado Livre Agência';
+function isFlex(f){return /flex|ag[eê]ncia/i.test((f&&f.marketplace)||'');} // qualquer despacho (Flex ou Agência)
+function tipoD(f){return /ag[eê]ncia/i.test((f&&f.marketplace)||'')?'agencia':'flex';}
+const NOME_D={flex:'Flex',agencia:'Agência'};
+function stD(f){const m={...ST_FLEX};if(tipoD(f)==='agencia'){m.enviado=['Postado na agência','b-rota'];m.parcial=['Entregue em parte','b-par'];}return m;}
 const ST_FLEX={preparacao:['A despachar','b-prep'],conferido:['Separado','b-lib'],enviado:['Em rota de entrega','b-rota'],parcial:['Entregue em parte','b-par'],recebido:['Entregue','b-rec'],divergencia:['Com ocorrência','b-ret'],cancelado:['Cancelado','b-can']};
 const TIPOS_MOV={aporte:'Aporte de capital',emprestimo:'Empréstimo do participante',despesa_paga:'Despesa paga em nome da empresa',reembolso:'Reembolso ao participante',retirada:'Retirada'};
 const PERM_PAPEL={eua:['produtos','compras','receber_compras','remessas','alfandega'],brasil:['alfandega','warehouse','full'],socio:[]};
@@ -350,7 +353,7 @@ function uuid(){const b=new Uint8Array(16);crypto.getRandomValues(b);b[6]=(b[6]&
 const C_ENV='id,transportadora,rastreio,caixas,peso_kg,data_saida,status,data_alfandega,obs_alfandega,data_chegada,obs_chegada,obs,criado_por,recebido_por,criado_em,origem,destino,previsao,moeda_despesas,responsavel,chave,saida_em,saida_por,warehouse_id,status_transito,encerrado_motivo,rota,etapa';
 const C_ETAPA='id,envio_id,etapa,data,responsavel,telefone,rastreio,volumes,moeda,obs,criado_por,criado_em';
 const C_ALF='id,envio_id,status,data,documentos,moeda,obs,criado_por,criado_em';
-const C_FULL='id,chave,warehouse_id,marketplace,conta,empresa,cd_destino,identificador,volumes,etiquetas,responsavel,data_saida,transporte,moeda,status,obs,conferido_por,conferido_em,saida_por,saida_em,encerrado_motivo,criado_por,criado_em';
+const C_FULL='id,destino,rastreio,chave,warehouse_id,marketplace,conta,empresa,cd_destino,identificador,volumes,etiquetas,responsavel,data_saida,transporte,moeda,status,obs,conferido_por,conferido_em,saida_por,saida_em,encerrado_motivo,criado_por,criado_em';
 const C_PED='id,chave,fornecedor,numero,data,previsao,responsavel,moeda,obs,status,perc_recebido,motivo_status,criado_por,criado_em,atualizado_por,atualizado_em';
 const C_PEDI='id,pedido_id,produto_id,variacao,embalagem,un_por_emb,qtd,qtd_aprovada,qtd_divergencia,qtd_baixada';
 function mesclarSigilosos(N,S){if(!S)return;const idx=(a,k='id')=>{const m={};(a||[]).forEach(x=>m[x[k]]=x);return m;};
@@ -529,7 +532,7 @@ function abasDoPapel(){
   if(tem('compras')||verCusto())a.push(['compras','Compras']);
   if(tem('receber_compras')||tem('compras'))a.push(['receb','Recebimento']);
   a.push(['eua','Estoque EUA']);
-  a.push(['remessas','Remessas']);a.push(['brasil','Estoque Brasil']);a.push(['full','Full']);a.push(['flex','Despachos Flex']);
+  a.push(['remessas','Remessas']);a.push(['brasil','Estoque Brasil']);a.push(['full','Full']);a.push(['flex','Despachos']);
   if(tem('ver_financeiro'))a.push(['gastos','Gastos']);
   if(tem('ver_aportes'))a.push(['aportes','Aportes']);
   if(ehAdmin()){a.push(['usuarios','Usuários']);a.push(['cadastros','Cadastros']);a.push(['acessos','Acessos']);}
@@ -580,7 +583,7 @@ function abaPainel(){
     ${ETAPAS.map(([k])=>kpi(un(pe[k]||0),ETAPA_CURTA[k],'remessas')).join('')}
     ${pe.direta?kpi(un(pe.direta),'Rota direta (DHL / etiquetas)','remessas'):''}${ti.a?kpi(un(ti.a)+' un. · '+alf.length+' remessa(s)','Na alfândega','remessas'):''}
     ${porWh.map(x=>kpi(un(x.l),'Estoque Brasil · '+esc(x.w.nome)+(x.r?' · '+un(x.r)+' reservado':''),'brasil')).join('')}
-    ${kpi(un(tf),'Em trânsito para o Full','full')}${kpi(un(nf),'Confirmado no Full','full')}${kpi(un(D.full.filter(f=>isFlex(f)&&['preparacao','conferido'].includes(f.status)).length),'Flex a despachar','flex')}${kpi(un(D.full.filter(f=>isFlex(f)&&['enviado','parcial'].includes(f.status)).length),'Flex em rota de entrega','flex')}
+    ${kpi(un(tf),'Em trânsito para o Full','full')}${kpi(un(nf),'Confirmado no Full','full')}${kpi(un(D.full.filter(f=>isFlex(f)&&['preparacao','conferido'].includes(f.status)).length),'Despachos a enviar (Flex/Agência)','flex')}${kpi(un(D.full.filter(f=>isFlex(f)&&['enviado','parcial'].includes(f.status)).length),'Despachos em rota / postados','flex')}
     ${Object.entries(contas).map(([k,v])=>kpi(un(v),'No Full · '+esc(k),'full')).join('')}</div>
   ${fin}${apo}
   ${ehAdmin()?`<h3>Situação do sistema</h3><div class="total">
@@ -1282,21 +1285,22 @@ function abaBrasil(){
 // ---------- ENVIO PARA O FULL ----------
 let filtroFull='abertos';
 function totFull(f){const it=f.envio_full_itens||[];return {q:it.reduce((s,i)=>s+i.qtd,0),r:it.reduce((s,i)=>s+i.qtd_recebida,0),d:it.reduce((s,i)=>s+i.qtd_divergencia,0),p:it.reduce((s,i)=>s+fullPend(i),0)};}
-let filtroFlex='abrir';
-function abaFlex(){const F=D.full.filter(isFlex);
+let filtroFlex='abrir',tipoFlex='todos';
+function abaFlex(){const F=D.full.filter(isFlex).filter(x=>tipoFlex==='todos'||tipoD(x)===tipoFlex);
   const G={abrir:x=>['preparacao','conferido'].includes(x.status),rota:x=>['enviado','parcial'].includes(x.status),ent:x=>x.status==='recebido',oco:x=>x.status==='divergencia',todos:()=>true};
-  const lst=F.filter(G[filtroFlex]).filter(x=>bate('#'+x.id,x.conta,x.identificador,x.cd_destino,x.transporte,x.empresa,...(x.envio_full_itens||[]).map(i=>nomeP(i.produto_id))));
+  const lst=F.filter(G[filtroFlex]).filter(x=>bate('#'+x.id,x.conta,x.identificador,x.cd_destino,x.destino,x.rastreio,x.transporte,x.empresa,...(x.envio_full_itens||[]).map(i=>nomeP(i.produto_id))));
   const n=fn=>F.filter(fn).length;
   const porConta={};F.filter(x=>G.abrir(x)||G.rota(x)).forEach(x=>{const k=x.conta||'Sem conta';porConta[k]=(porConta[k]||0)+1;});
   const entHoje=F.filter(x=>x.status==='recebido'&&String(x.data_saida||'').slice(0,10)===hoje()).length;
-  return barraBusca('Buscar despacho, nº da venda, conta, cliente, entregador ou produto…',tem('full')?'<button class="primary" data-act="flex">+ Despacho Flex</button>':'')+
+  return barraBusca('Buscar despacho, nº da venda, conta, cliente, entregador ou produto…',tem('full')?'<button class="primary" data-act="flex">+ Despacho Flex</button><button class="primary" data-act="agencia">+ Despacho Agência</button>':'')+
   `<div class="resumo">${kpi(un(n(G.abrir)),'A despachar')}${kpi(un(n(G.rota)),'Em rota de entrega')}${kpi(un(entHoje),'Entregues hoje')}${Object.entries(porConta).map(([k,v])=>kpi(un(v),'Abertos · '+esc(k))).join('')}</div>
+  <div class="chips" style="margin-bottom:6px">${chip(tipoFlex,'todos','Flex e Agência','tflex')}${chip(tipoFlex,'flex','Só Flex','tflex')}${chip(tipoFlex,'agencia','Só Agência','tflex')}</div>
   <div class="chips" style="margin-bottom:10px">${chip(filtroFlex,'abrir','A despachar ('+n(G.abrir)+')','fflex')}${chip(filtroFlex,'rota','Em rota ('+n(G.rota)+')','fflex')}${chip(filtroFlex,'ent','Entregues','fflex')}${chip(filtroFlex,'oco','Com ocorrência ('+n(G.oco)+')','fflex')}${chip(filtroFlex,'todos','Todos','fflex')}</div>
-  <div class="lista">${lst.length?lst.map(x=>{const t=totFull(x);return `<div class="card click" data-full="${x.id}"><div><div class="t">Flex #${x.id}${x.conta?' · '+esc(x.conta):''} ${bdg(ST_FLEX,x.status)}</div>
-    <div class="meta">${x.identificador?'Venda <b>'+esc(x.identificador)+'</b> · ':''}${esc(wh(x.warehouse_id).nome)} → ${esc(x.cd_destino||'cliente')}${x.transporte?' · entregador '+esc(x.transporte):''}${x.data_saida?' · '+fd(x.data_saida):''}</div>
+  <div class="lista">${lst.length?lst.map(x=>{const t=totFull(x);return `<div class="card click" data-full="${x.id}"><div><div class="t">${NOME_D[tipoD(x)]} #${x.id} · <b>${esc(x.cd_destino||'cliente não informado')}</b>${x.conta?' · '+esc(x.conta):''} ${bdg(stD(x),x.status)}</div>
+    <div class="meta">${x.identificador?'Venda <b>'+esc(x.identificador)+'</b> · ':''}${x.destino?esc(x.destino)+' · ':''}saiu de ${esc(wh(x.warehouse_id).nome)}${x.transporte?' · '+(tipoD(x)==='agencia'?'agência ':'entregador ')+esc(x.transporte):''}${x.rastreio?' · rastreio <b>'+esc(x.rastreio)+'</b>':''}${x.data_saida?' · '+fd(x.data_saida):''}</div>
     <div class="meta">${(x.envio_full_itens||[]).map(i=>esc(nomeP(i.produto_id))+' × '+un(i.qtd)).join(' · ')}</div></div>
     <div class="dir"><div class="n">${un(t.q)} un.</div><button class="small">Abrir</button></div></div>`;}).join(''):'<div class="vazio">Nenhum despacho aqui.</div>'}</div>
-  <div class="total" style="margin-top:12px"><b>Contas do Mercado Livre:</b> cada despacho fica ligado à conta que vendeu. Os produtos saem do Estoque Brasil quando o despacho é criado (reserva) e baixam quando ele é marcado como entregue. A importação automática das vendas Flex de cada conta entra quando as contas forem conectadas ao sistema.</div>`;
+  <div class="total" style="margin-top:12px"><b>Transparência:</b> cada despacho (Flex ou Agência) mostra a conta do Mercado Livre que vendeu, o cliente, o destino, o nº da venda e os produtos com quantidade. Os produtos saem do Estoque Brasil quando o despacho é criado (reserva) e baixam quando ele é marcado como entregue. A importação automática das vendas Flex de cada conta entra quando as contas forem conectadas ao sistema.</div>`;
 }
 function abaFull(){
   const f={abertos:x=>['preparacao','conferido'].includes(x.status),transito:x=>['enviado','parcial'].includes(x.status),div:x=>x.status==='divergencia',rec:x=>x.status==='recebido',todos:()=>true}[filtroFull];
@@ -1311,29 +1315,37 @@ function abaFull(){
     ${['enviado','parcial','divergencia','recebido'].includes(x.status)?`<div class="meta">Recebido pelo Full <b>${un(t.r)}</b> de ${un(t.q)}${t.d?' · <b>'+un(t.d)+' em divergência</b>':''}</div>`:''}</div>
     <div class="dir"><div class="n">${un(t.q)} un.</div><button class="small">Abrir</button></div></div>`;}).join(''):'<div class="vazio">Nenhum envio aqui.</div>'}</div>`;
 }
-function rotularFlex(f){const m=$('modal');if(!m)return;const T=[[/Registrar recebimento no Full/,'Registrar entrega ao cliente'],[/Recebido Full/,'Entregue'],[/^Full #/,'Flex #'],[/Confirmar saída$/,'Saiu para entrega'],[/Recebido pelo Full/,'Entregue'],[/no Full/g,'ao cliente']];
+function rotularFlex(f){const m=$('modal');if(!m)return;const ag=tipoD(f)==='agencia';const T=[[/Registrar recebimento no Full/,'Registrar entrega ao cliente'],[/Recebido Full/,'Entregue'],[/^Full #/,NOME_D[tipoD(f)]+' #'],[/Confirmar saída$/,ag?'Postado na agência':'Saiu para entrega'],[/Recebido pelo Full/,'Entregue'],[/no Full/g,'ao cliente']];
   m.querySelectorAll('h2,button,th,label,.sub,.meta').forEach(el=>{el.childNodes.forEach(nd=>{if(nd.nodeType===3){let t=nd.textContent;T.forEach(([a,b])=>t=t.replace(a,b));nd.textContent=t;}});});
-  const h=m.querySelector('h2 .badge');if(h&&ST_FLEX[f.status]){h.textContent=ST_FLEX[f.status][0];}}
+  const h=m.querySelector('h2 .badge');const st=stD(f);if(h&&st[f.status]){h.textContent=st[f.status][0];}
+  const sub=m.querySelector('.sub');if(sub)sub.insertAdjacentHTML('beforebegin',`<div class="total"><b>Cliente:</b> ${esc(f.cd_destino||'não informado')}${f.destino?' · '+esc(f.destino):''}${f.identificador?' · venda <b>'+esc(f.identificador)+'</b>':''}${f.conta?' · conta ML <b>'+esc(f.conta)+'</b>':''}${f.rastreio?' · rastreio <b>'+esc(f.rastreio)+'</b>':''}
+   <br><b>Produtos:</b> ${(f.envio_full_itens||[]).map(i=>esc(nomeP(i.produto_id))+(produto(i.produto_id).sku?' ('+esc(produto(i.produto_id).sku)+')':'')+' × <b>'+un(i.qtd)+'</b>').join(' · ')}
+   ${tem('full')&&!ehSocio()?` <button class="link" id="de_edt">${ag?'Informar rastreio / destino':'Editar destino'}</button>`:''}</div>`);
+  const b=$('de_edt');if(b)b.onclick=()=>{abrir(`<h2>${NOME_D[tipoD(f)]} #${f.id} — destino${ag?' e rastreio':''}</h2>
+    <div class="duas"><div class="campo"><label>Cidade / bairro / endereço</label><input id="dd_d" value="${esc(f.destino||'')}"></div>${ag?`<div class="campo"><label>Código de rastreio</label><input id="dd_r" value="${esc(f.rastreio||'')}"></div>`:'<div></div>'}</div>
+    <div class="erro"></div><div class="rodape"><button id="cx">Voltar</button><button class="primary" id="ok">Salvar</button></div>`);
+    $('cx').onclick=()=>modalFullDet(f.id);$('ok').onclick=()=>rodar($('ok'),async()=>{await rpc('salvar_despacho',{p_id:f.id,p_destino:val('dd_d'),p_rastreio:$('dd_r')?val('dd_r'):(f.rastreio||'')});await carregar();toast('Despacho atualizado.');modalFullDet(f.id);});};}
 function modalFullNovo(flex){
   const ws=D.warehouses.filter(w=>w.ativo);let w=+lerPref('iron_wh',ws[0]?ws[0].id:0);if(!ws.find(x=>x.id===w)&&ws[0])w=ws[0].id;
   const contas=[...new Set(D.full.filter(f=>!!flex===isFlex(f)).map(f=>f.conta).filter(Boolean).concat(flex?[]:['Nexxcompany','Fortis Company']))],emps=[...new Set(D.full.map(f=>f.empresa).filter(Boolean))],cds=[...new Set(D.full.map(f=>f.cd_destino).filter(Boolean))];
   zerarLidos();reabrir=null;
   const prods=()=>D.produtos.map(p=>({p,d:brLivre(p.id,w)})).filter(x=>x.d>0).sort((a,b)=>a.p.nome.localeCompare(b.p.nome));
-  abrir(`<h2>${flex?'Novo despacho Flex':'Novo envio para o Full'}</h2><div class="sub">Só aparecem produtos disponíveis no depósito escolhido. Os itens ficam reservados até a saída.</div>
+  const ag=flex==='agencia';
+  abrir(`<h2>${flex?'Novo despacho '+(ag?'Agência':'Flex'):'Novo envio para o Full'}</h2><div class="sub">Só aparecem produtos disponíveis no depósito escolhido. Os itens ficam reservados até a saída.</div>
   <div class="tres"><div class="campo"><label>Depósito de origem</label><select id="fu_w">${ws.map(x=>`<option value="${x.id}" ${x.id===w?'selected':''}>${esc(x.nome)}</option>`).join('')}</select></div>
-   ${flex?`<input type="hidden" id="fu_m" value="${FLEX}"><div class="campo"><label>Nº da venda / envio ML</label><input id="fu_id" placeholder="ex.: 2000012345678"></div>`:`<div class="campo"><label>Marketplace</label><select id="fu_m">${MARKETS.map(m=>`<option>${m}</option>`).join('')}</select></div>`}
+   ${flex?`<input type="hidden" id="fu_m" value="${ag?AGENCIA:FLEX}"><div class="campo"><label>Nº da venda / envio ML</label><input id="fu_id" placeholder="ex.: 2000012345678"></div>`:`<div class="campo"><label>Marketplace</label><select id="fu_m">${MARKETS.map(m=>`<option>${m}</option>`).join('')}</select></div>`}
    <div class="campo"><label>${flex?'Conta do Mercado Livre':'Conta'}</label><input id="fu_c" list="dl_fc"><datalist id="dl_fc">${contas.map(c=>`<option value="${esc(c)}">`).join('')}</datalist></div></div>
   <div class="tres"><div class="campo"><label>Empresa vinculada</label><input id="fu_e" list="dl_fe"><datalist id="dl_fe">${emps.map(c=>`<option value="${esc(c)}">`).join('')}</datalist></div>
-   <div class="campo"><label>${flex?'Cliente / bairro de entrega':'Centro de distribuição'}</label><input id="fu_cd" list="dl_fcd"><datalist id="dl_fcd">${flex?'':cds.map(c=>`<option value="${esc(c)}">`).join('')}</datalist></div>
-   ${flex?'<div></div>':'<div class="campo"><label>Identificador do envio</label><input id="fu_id" placeholder="nº do envio no marketplace"></div>'}</div>
+   <div class="campo"><label>${flex?'Cliente (nome do comprador)':'Centro de distribuição'}</label><input id="fu_cd" list="dl_fcd"><datalist id="dl_fcd">${flex?'':cds.map(c=>`<option value="${esc(c)}">`).join('')}</datalist></div>
+   ${flex?'<div class="campo"><label>Cidade / bairro / endereço</label><input id="de_dst"></div>':'<div class="campo"><label>Identificador do envio</label><input id="fu_id" placeholder="nº do envio no marketplace"></div>'}</div>
   <div class="tres"><div class="campo"><label>Data de saída prevista</label><input id="fu_d" type="date" value="${hoje()}"></div>
-   <div class="campo"><label>${flex?'Entregador / motoboy':'Transporte'}</label><input id="fu_t" value="${flex?'':'Veículo particular'}"></div>
+   <div class="campo"><label>${flex?(ag?'Agência de postagem':'Entregador / motoboy'):'Transporte'}</label><input id="fu_t" value="${flex?'':'Veículo particular'}" placeholder="${ag?'ex.: Agência ML / Correios':''}"></div>
    <div class="campo"><label>Responsável</label><input id="fu_r" value="${esc(eu())}"></div></div>
-  <div class="tres"><div class="campo"><label>Volumes</label><input id="fu_v" inputmode="numeric"></div><div class="campo"><label>Etiquetas</label><input id="fu_et" placeholder="${flex?'etiqueta Flex':'ex.: 40 etiquetas ML'}"></div>
-   ${verCusto()?'<div class="campo"><label>'+(flex?'Custo da entrega (R$)':'Custo do transporte (R$)')+'</label><input id="fu_cu" inputmode="decimal"></div>':'<div></div>'}</div>
+  <div class="tres"><div class="campo"><label>Volumes</label><input id="fu_v" inputmode="numeric"></div>${ag?'<div class="campo"><label>Código de rastreio</label><input id="de_ras"></div>':`<div class="campo"><label>Etiquetas</label><input id="fu_et" placeholder="${flex?'etiqueta Flex':'ex.: 40 etiquetas ML'}"></div>`}
+   ${verCusto()?'<div class="campo"><label>'+(flex?(ag?'Custo da postagem (R$)':'Custo da entrega (R$)'):'Custo do transporte (R$)')+'</label><input id="fu_cu" inputmode="decimal"></div>':'<div></div>'}</div>
   ${scanHtml(flex?'Bipe os produtos do pedido':'Bipe os produtos que vão para o Full')}
   <div class="tab rolar" id="fu_lst"></div><div class="total" id="fu_tot"></div>
-  <div class="campo"><label>Observação</label><input id="fu_o"></div>${campoArquivos('fu_arq',flex?'Etiqueta, foto do pacote e comprovante de entrega':'Etiquetas, autorizações e comprovantes')}
+  <div class="campo"><label>Observação</label><input id="fu_o"></div>${campoArquivos('fu_arq',flex?(ag?'Etiqueta, comprovante de postagem e foto do pacote':'Etiqueta, foto do pacote e comprovante de entrega'):'Etiquetas, autorizações e comprovantes')}
   <div class="erro"></div><div class="rodape"><button id="cx">Cancelar</button><button class="primary" id="ok">Salvar (reservar)</button></div>`);
   const M=$('modal');let L=prods();const q=pid=>M.querySelector(`[data-fq="${pid}"]`);
   const des=()=>{L=prods();$('fu_lst').innerHTML=L.length?L.map(x=>`<div class="lin"><div class="pinfo">${foto(x.p,1)}<div>${esc(x.p.nome)}<div class="meta">${esc(x.p.sku||x.p.ean||'')} · <b>${un(x.d)}</b> disponível</div></div></div><input data-fq="${x.p.id}" inputmode="numeric" placeholder="0"></div>`).join(''):'<div class="lin">Nada disponível neste depósito.</div>';calc();};
@@ -1343,12 +1355,14 @@ function modalFullNovo(flex){
   $('cx').onclick=fechar;const chave=uuid();
   $('ok').onclick=()=>{const s=calc(),er=M.querySelector('.erro');if(!s.length){er.textContent='Informe a quantidade de pelo menos um produto.';return;}
     const ex=s.find(x=>x.q>x.d);if(ex){er.textContent=ex.p.nome+': só há '+un(ex.d)+' un. disponíveis.';return;}
+    if(flex&&!val('fu_cd')){er.textContent='Informe o cliente (nome do comprador).';return;}
     gravarPref('iron_wh',String(w));
     rodar($('ok'),async()=>{const id=await rpc('criar_envio_full',{p:{chave,warehouse_id:w,marketplace:$('fu_m').value,conta:val('fu_c'),empresa:val('fu_e'),cd_destino:val('fu_cd'),identificador:val('fu_id'),data_saida:val('fu_d'),
-      transporte:val('fu_t'),responsavel:val('fu_r'),volumes:val('fu_v')?num(val('fu_v')):null,etiquetas:val('fu_et'),custo:$('fu_cu')?dinheiro(val('fu_cu'))||0:0,obs:val('fu_o'),itens:s.map(x=>({produto_id:x.p.id,qtd:x.q}))}});
-      const ax=await anexarDepois('full',id,'fu_arq');pararCam();await carregar();toast((flex?'Despacho Flex #':'Envio Full #')+id+' criado. Itens reservados.'+ax);aba=flex?'flex':'full';if(flex)filtroFlex='abrir';else filtroFull='abertos';modalFullDet(id);});};
+      transporte:val('fu_t'),responsavel:val('fu_r'),volumes:val('fu_v')?num(val('fu_v')):null,etiquetas:$('fu_et')?val('fu_et'):'',custo:$('fu_cu')?dinheiro(val('fu_cu'))||0:0,obs:val('fu_o'),itens:s.map(x=>({produto_id:x.p.id,qtd:x.q}))}});
+      if(flex&&(val('de_dst')||val('de_ras')))await rpc('salvar_despacho',{p_id:id,p_destino:val('de_dst'),p_rastreio:$('de_ras')?val('de_ras'):''});
+      const ax=await anexarDepois('full',id,'fu_arq');pararCam();await carregar();toast((flex?'Despacho '+(ag?'Agência':'Flex')+' #':'Envio Full #')+id+' criado. Itens reservados.'+ax);aba=flex?'flex':'full';if(flex)filtroFlex='abrir';else filtroFull='abertos';modalFullDet(id);});};
 }
-function modalFullDet(id){const f=envFull(id);if(!f)return;reabrir=()=>modalFullDet(id);log('abriu',(isFlex(f)?'Despacho Flex #':'Envio Full #')+id);setTimeout(()=>{if(isFlex(f))rotularFlex(f);},0);
+function modalFullDet(id){const f=envFull(id);if(!f)return;reabrir=()=>modalFullDet(id);log('abriu',(isFlex(f)?'Despacho '+NOME_D[tipoD(f)]+' #':'Envio Full #')+id);setTimeout(()=>{if(isFlex(f))rotularFlex(f);},0);
   const it=f.envio_full_itens||[],t=totFull(f),dvs=D.divergencias.filter(d=>it.some(i=>i.id===d.full_item_id));
   const loteRem=l=>{const e=D.entradas.find(x=>x.id===l.entrada_br_id);if(!e)return '';const r=D.envios.find(v=>(v.envio_itens||[]).some(i=>i.id===e.envio_item_id));return r?'remessa #'+r.id:'devolução';};
   abrir(`<h2>Full #${f.id} · ${esc(f.marketplace)}${f.conta?' · '+esc(f.conta):''} ${bdg(ST_FULL,f.status)}</h2>
@@ -1593,7 +1607,7 @@ function abaAcessos(){
 
 // ---------- eventos ----------
 $('app').addEventListener('click',async e=>{
-  const t=e.target.closest('[data-aba],[data-act],[data-fe],[data-env],[data-prod],[data-ped],[data-receber],[data-conferir],[data-full],[data-resdiv],[data-lanc],[data-mov],[data-cad],[data-aud],[data-fped],[data-frec],[data-frem],[data-fwh],[data-ffull],[data-fflex],[data-fdiv],[data-feua]');if(!t)return;
+  const t=e.target.closest('[data-aba],[data-act],[data-fe],[data-env],[data-prod],[data-ped],[data-receber],[data-conferir],[data-full],[data-resdiv],[data-lanc],[data-mov],[data-cad],[data-aud],[data-fped],[data-frec],[data-frem],[data-fwh],[data-ffull],[data-fflex],[data-tflex],[data-fdiv],[data-feua]');if(!t)return;
   const d=t.dataset;
   if(d.receber){modalReceber(+d.receber);return;}
   if(d.conferir){modalChegada(+d.conferir);return;}
@@ -1607,7 +1621,7 @@ $('app').addEventListener('click',async e=>{
   if(d.cad){modalCad(d.cad,d.cadid?+d.cadid:null);return;}
   if(d.aud!=null){verAud=d.aud==='1';render();if(verAud){const r=await sb.from('auditoria').select('*').order('id',{ascending:false}).limit(400);AUD=r.data||[];render();}return;}
   if(d.aba){aba=d.aba;busca='';log('aba',t.textContent.trim());render();window.scrollTo(0,0);return;}
-  const fs={fped:v=>filtroPed=v,frec:v=>filtroRec=v,frem:v=>filtroRem=v,fwh:v=>filtroWh=v,ffull:v=>filtroFull=v,fflex:v=>filtroFlex=v,fdiv:v=>filtroDiv=v,feua:v=>filtroEUA=v};
+  const fs={fped:v=>filtroPed=v,frec:v=>filtroRec=v,frem:v=>filtroRem=v,fwh:v=>filtroWh=v,ffull:v=>filtroFull=v,fflex:v=>filtroFlex=v,tflex:v=>tipoFlex=v,fdiv:v=>filtroDiv=v,feua:v=>filtroEUA=v};
   for(const k in fs)if(d[k]){fs[k](d[k]);render();return;}
   const a=d.act;
   if(a==='sair')sb.auth.signOut();
@@ -1615,7 +1629,8 @@ $('app').addEventListener('click',async e=>{
   if(a==='pedido')modalPedido();
   if(a==='remessa')modalRemessa();
   if(a==='full')modalFullNovo();
-  if(a==='flex')modalFullNovo(true);
+  if(a==='flex')modalFullNovo('flex');
+  if(a==='agencia')modalFullNovo('agencia');
   if(a==='produto')modalNovoProduto();
   if(a==='lanc')modalLanc();
   if(a==='mov')modalMov();
