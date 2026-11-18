@@ -535,7 +535,7 @@ function render(){
   const abas=abasDoPapel();if(!abas.find(x=>x[0]===aba))aba=abas[0][0];
   const conteudo={painel:abaPainel,produtos:abaProdutos,compras:abaCompras,receb:abaReceb,eua:abaEUA,remessas:abaRemessas,brasil:abaBrasil,full:abaFull,diverg:abaDiverg,gastos:abaGastos,aportes:abaAportes,usuarios:abaUsuarios,cadastros:abaCadastros,acessos:abaAcessos}[aba]();
   const ativo=document.activeElement&&document.activeElement.id==='busca';const pos=ativo?document.activeElement.selectionStart:0;
-  $('app').innerHTML=`<div class="topo"><div class="wrap"><div class="marca">${logoHtml()}<span class="sep"></span><small>Compra EUA → Aladin → Paraguai → Freteiro → São Paulo → Warehouse → Full</small></div>
+  $('app').innerHTML=`<div class="topo"><div class="wrap"><div class="marca">${logoHtml()}</div>
     <div class="quem"><span>${esc(perfil.nome||perfil.email)}</span><span class="badge b-pap">${PAPEIS[perfil.papel]}</span>
     <button class="small" data-act="atualizar">Atualizar</button><button class="small" data-act="sair">Sair</button></div></div></div>
     <div class="wrap"><nav class="abas">${abas.map(([k,l])=>`<button class="${aba===k?'on':''}" data-aba="${k}">${l}</button>`).join('')}</nav>${conteudo}</div>`;
@@ -578,13 +578,13 @@ function abaPainel(){
     ${kpi(un(tf),'Em trânsito para o Full','full')}${kpi(un(nf),'Confirmado no Full','full')}
     ${Object.entries(contas).map(([k,v])=>kpi(un(v),'No Full · '+esc(k),'full')).join('')}</div>
   ${fin}${apo}
-  <h3>Situação do sistema</h3><div class="total">
+  ${ehAdmin()?`<h3>Situação do sistema</h3><div class="total">
    <b>Fluxo:</b> compra nos EUA → estoque EUA → remessa Aladin até o Paraguai → travessia com freteiro → transporte até São Paulo → conferência no Warehouse SP → Full. Remessas DHL / etiquetas avulsas seguem a rota direta.<br>
    <b>Sigilo:</b> custos, fretes, impostos, pagamentos, gastos e aportes aparecem só para o administrador e os sócios. O perfil EUA lança os valores, mas não os vê depois. Usuários e acessos: só o administrador.<br>
    <b>Ocorrências:</b> faltas, avarias e produtos errados são lançados na própria conferência e não entram no estoque.<br>
    <b>Automático:</b> cotação do dólar comercial (atualizada a cada 30 min, pode ser alterada em cada lançamento) · link direto de rastreio DHL/Aladin · leitura do código de barras pela câmera do celular.<br>
    <b>Integrações pendentes:</b> atualização automática do status da remessa pela API da DHL (precisa da chave de API da DHL) · confirmação automática do recebimento no Full pela API do Mercado Livre/Amazon (precisa de um aplicativo cadastrado no Mercado Livre).<br>
-   <b>Dados demonstrativos:</b> nenhum — tudo o que aparece aqui foi lançado no sistema.</div>`;
+   <b>Dados demonstrativos:</b> nenhum — tudo o que aparece aqui foi lançado no sistema.</div>`:''}`;
 }
 
 // ---------- PRODUTOS ----------
