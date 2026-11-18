@@ -126,21 +126,34 @@ DESPACHOS_E_FULL = ${JSON.stringify(despachos)}
 COMPRAS = ${JSON.stringify(compras)}`;
       const key = Deno.env.get("ANTHROPIC_API_KEY");
       if (!key) return json({ erro: "A chave da IA ainda não foi configurada." }, 500);
+      if (body.stream === false) {
+        const txt = await claude(sys, [{ type: "text", text: q }], 1500);
+        return json({ resposta: txt });
+      }
       const r = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
         body: JSON.stringify({ model: MODELO, max_tokens: 1500, stream: true, system: sys, messages: [{ role: "user", content: q }] }),
       });
       if (!r.ok || !r.body) { const t = await r.text(); return json({ erro: "IA: " + t.slice(0, 300) }, 500); }
-      // repassa só o texto, em tempo real
-      const enc = new TextEncoder(), dec = new TextDecoder();
-      const saida = new ReadableStream({ async start(ctrl) {
-        const rd = r.body!.getReader(); let buf = "";
-        while (true) { const { value, done } = await rd.read(); if (done) break; buf += dec.decode(value, { stream: true });
-          let i; while ((i = buf.indexOf("\n")) >= 0) { const l = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
-            if (!l.startsWith("data:")) continue; try { const ev = JSON.parse(l.slice(5)); if (ev.type === "content_block_delta" && ev.delta?.text) ctrl.enqueue(enc.encode(ev.delta.text)); else if (ev.type === "error") ctrl.enqueue(enc.encode("\n\n(A IA teve um problema: " + (ev.error?.message || "erro") + ". Tente de novo.)")); } catch (_) { /* ignora */ } } }
-        ctrl.close(); } });
-      return new Response(saida, { headers: { ...CORS, "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-cache" } });
+      // repassa só o texto, em tempo real; "\u0004" no fim = resposta completa
+      let buf = "";
+      const tr = new TransformStream<string, string>({
+        transform(chunk, ctrl) {
+          buf += chunk; let i;
+          while ((i = buf.indexOf("\n")) >= 0) {
+            const l = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+            if (!l.startsWith("data:")) continue;
+            try { const ev = JSON.parse(l.slice(5));
+              if (ev.type === "content_block_delta" && ev.delta?.text) ctrl.enqueue(ev.delta.text);
+              else if (ev.type === "message_stop") ctrl.enqueue("\u0004");
+              else if (ev.type === "error") ctrl.enqueue("\n\n(A IA teve um problema: " + (ev.error?.message || "erro") + ")");
+            } catch (_) { /* linha incompleta */ }
+          }
+        },
+      });
+      const saida = r.body.pipeThrough(new TextDecoderStream()).pipeThrough(tr).pipeThrough(new TextEncoderStream());
+      return new Response(saida, { headers: { ...CORS, "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-cache", "X-Accel-Buffering": "no" } });
     }
     return json({ erro: "Ação desconhecida." }, 400);
   } catch (e) {

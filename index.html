@@ -471,8 +471,11 @@ function modalIA(){reabrir=null;
     const resp=await fetch(SUPABASE_URL+'/functions/v1/ia',{method:'POST',headers:{'Content-Type':'application/json',apikey:SUPABASE_KEY,Authorization:'Bearer '+(session?session.access_token:SUPABASE_KEY)},body:JSON.stringify({acao:'perguntar',pergunta:t})});
     if(!resp.ok||/json/.test(resp.headers.get('content-type')||'')){let m='Falha na IA';try{const j=await resp.json();m=j.erro||m;}catch(e){}IA_HIST.pop();alvo.innerHTML='<span class="warn">'+esc(m)+'</span>';throw new Error(m);}
     const rd=resp.body.getReader(),dc=new TextDecoder();
-    while(true){const {value,done}=await rd.read();if(done)break;h.r+=dc.decode(value,{stream:true});alvo.innerHTML=fmt(h.r);box.scrollTop=box.scrollHeight;}
-    if(!h.r)alvo.innerHTML='<span class="meta">Sem resposta. Tente de novo.</span>';
+    let fim=false;
+    try{while(true){const {value,done}=await rd.read();if(done)break;h.r+=dc.decode(value,{stream:true});if(h.r.includes('\u0004')){fim=true;h.r=h.r.replace(/\u0004/g,'');}alvo.innerHTML=fmt(h.r);box.scrollTop=box.scrollHeight;}}catch(e){}
+    if(!fim){alvo.innerHTML=fmt(h.r)+'<div class="meta">completando a resposta…</div>';
+      try{const r2=await iaChamar({acao:'perguntar',pergunta:t,stream:false});h.r=r2.resposta||h.r;}catch(e){h.r+=(h.r?'\n\n':'')+'(Não consegui completar: '+e.message+')';}
+      alvo.innerHTML=fmt(h.r);box.scrollTop=box.scrollHeight;}
     log('acao','Perguntou ao assistente');q.focus();});}
 function campoArquivos(id,rot){return `<div class="campo"><label>${rot||'Anexos (recibos, invoices, comprovantes, fotos)'} <span style="font-weight:400;color:var(--mut)">(opcional)</span></label>
   <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><label class="btnfile">📷 Escanear com a câmera<input id="${id}_cam" type="file" accept="image/*" capture="environment" multiple class="hidden" onchange="this.parentNode.firstChild.textContent='📷 '+this.files.length+' foto(s) prontas '"></label>
