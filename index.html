@@ -445,7 +445,7 @@ async function arquivoBase64(f){let b=f,tipo=f.type;if(/^image\//.test(f.type)){
 let IA_HIST=[];
 function modalIA(){reabrir=null;
   abrir(`<h2>🤖 Assistente</h2><div class="sub">Pergunte sobre estoque, compras, remessas, etapas e despachos. Ex.: "quanto tenho do produto X no depósito?", "quais remessas estão no Paraguai?", "quais despachos da conta Y saíram hoje?"</div>
-  <div id="ia_hist" class="lista" style="max-height:50vh;overflow:auto">${IA_HIST.map(h=>`<div class="item"><b>Você:</b> ${esc(h.q)}<div style="margin-top:6px;white-space:pre-wrap">${esc(h.r)}</div></div>`).join('')}</div>
+  <div id="ia_hist" class="lista" style="max-height:50vh;overflow:auto">${IA_HIST.map(h=>`<div class="item"><b>Você:</b> ${esc(h.q)}<div style="margin-top:6px;white-space:pre-wrap">${esc(h.r).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/^- /gm,'• ')}</div></div>`).join('')}</div>
   <div class="campo"><textarea id="ia_q" rows="2" placeholder="Escreva sua pergunta…" style="width:100%"></textarea></div>
   <div class="erro"></div><div class="rodape"><button id="cx">Fechar</button><button class="primary" id="ok">Perguntar</button></div>`);
   $('cx').onclick=fechar;const q=$('ia_q');q.focus();q.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('ok').click();}});
