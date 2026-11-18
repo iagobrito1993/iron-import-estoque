@@ -10,16 +10,16 @@ const CORS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 const MODELO = "claude-sonnet-5-5";       // leitura de notas (precisão)
-const MODELO_RAPIDO = "claude-haiku-5-5"; // perguntas (velocidade)
+const MODELO_PERGUNTAS = "claude-haiku-5-5"; // perguntas: rápido; os números já chegam calculados
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, "Content-Type": "application/json" } });
 
-async function claude(system: string, content: unknown[], max_tokens = 4000) {
+async function claude(system: unknown, content: unknown[], max_tokens = 4000, modelo = MODELO) {
   const key = Deno.env.get("ANTHROPIC_API_KEY");
   if (!key) throw new Error("A chave da IA ainda não foi configurada no Supabase (segredo ANTHROPIC_API_KEY).");
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-    body: JSON.stringify({ model: MODELO, max_tokens, system, messages: [{ role: "user", content }] }),
+    body: JSON.stringify({ model: modelo, max_tokens, system, messages: [{ role: "user", content }] }),
   });
   const j = await r.json();
   if (!r.ok) throw new Error("IA: " + (j?.error?.message || r.status));
@@ -126,14 +126,16 @@ DESPACHOS_E_FULL = ${JSON.stringify(despachos)}
 COMPRAS = ${JSON.stringify(compras)}`;
       const key = Deno.env.get("ANTHROPIC_API_KEY");
       if (!key) return json({ erro: "A chave da IA ainda não foi configurada." }, 500);
+      const modeloQ = (perfil.papel === "admin" && body.modelo) ? String(body.modelo) : MODELO_PERGUNTAS;
+      const sistema = [{ type: "text", text: sys, cache_control: { type: "ephemeral" } }];
       if (body.stream === false) {
-        const txt = await claude(sys, [{ type: "text", text: q }], 1500);
+        const txt = await claude(sistema as any, [{ type: "text", text: q }], 1500, modeloQ);
         return json({ resposta: txt });
       }
       const r = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-        body: JSON.stringify({ model: MODELO, max_tokens: 1500, stream: true, system: sys, messages: [{ role: "user", content: q }] }),
+        body: JSON.stringify({ model: modeloQ, max_tokens: 1500, stream: true, system: sistema, messages: [{ role: "user", content: q }] }),
       });
       if (!r.ok || !r.body) { const t = await r.text(); return json({ erro: "IA: " + t.slice(0, 300) }, 500); }
       // repassa só o texto, em tempo real; "\u0004" no fim = resposta completa
