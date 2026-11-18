@@ -444,13 +444,15 @@ async function arquivoBase64(f){let b=f,tipo=f.type;if(/^image\//.test(f.type)){
   const buf=new Uint8Array(await b.arrayBuffer());let s='';for(let i=0;i<buf.length;i+=32768)s+=String.fromCharCode.apply(null,buf.subarray(i,i+32768));return {tipo,base64:btoa(s)};}
 let IA_HIST=[];
 function modalIA(){reabrir=null;
-  abrir(`<h2>🤖 Assistente</h2><div class="sub">Pergunte sobre estoque, compras, remessas, etapas e despachos. Ex.: "quanto tenho do produto X no depósito?", "quais remessas estão no Paraguai?", "quais despachos da conta Y saíram hoje?"</div>
-  <div id="ia_hist" class="lista" style="max-height:50vh;overflow:auto">${IA_HIST.map(h=>`<div class="item"><b>Você:</b> ${esc(h.q)}<div style="margin-top:6px;white-space:pre-wrap">${esc(h.r).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/^- /gm,'• ')}</div></div>`).join('')}</div>
-  <div class="campo"><textarea id="ia_q" rows="2" placeholder="Escreva sua pergunta…" style="width:100%"></textarea></div>
-  <div class="erro"></div><div class="rodape"><button id="cx">Fechar</button><button class="primary" id="ok">Perguntar</button></div>`);
+  abrir(`<div style="display:flex;flex-direction:column;height:min(78vh,720px)"><h2 style="margin-bottom:4px">🤖 Assistente</h2>
+  <div class="sub" style="margin-bottom:8px">Pergunte sobre estoque, compras, remessas, etapas e despachos.</div>
+  <div id="ia_hist" style="flex:1;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:8px;min-height:120px">${IA_HIST.length?IA_HIST.map(h=>`<div class="item"><b>Você:</b> ${esc(h.q)}<div style="margin-top:6px;white-space:pre-wrap">${esc(h.r).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/^- /gm,'• ')}</div></div>`).join(''):'<div class="meta">Exemplos: "quanto tenho do produto X no depósito?" · "quais remessas estão no Paraguai?" · "quais despachos da conta Y saíram hoje?"</div>'}</div>
+  <div style="display:flex;gap:8px;margin-top:10px;align-items:flex-end"><textarea id="ia_q" rows="2" placeholder="Escreva sua pergunta e aperte Enter…" style="flex:1"></textarea>
+   <button class="primary" id="ok">Perguntar</button><button id="cx">Fechar</button></div><div class="erro"></div></div>`);
+  const hb=$('ia_hist');hb.scrollTop=hb.scrollHeight;
   $('cx').onclick=fechar;const q=$('ia_q');q.focus();q.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('ok').click();}});
   $('ok').onclick=()=>rodar($('ok'),async()=>{const t=val('ia_q');if(!t)return;q.value='';
-    const h={q:t,r:''};IA_HIST.push(h);const box=$('ia_hist');
+    const h={q:t,r:''};IA_HIST.push(h);const box=$('ia_hist');if(!box.querySelector('.item'))box.innerHTML='';
     box.insertAdjacentHTML('beforeend',`<div class="item"><b>Você:</b> ${esc(t)}<div class="ia_r" style="margin-top:6px;white-space:pre-wrap"><span class="meta">Pensando…</span></div></div>`);
     const alvo=box.lastElementChild.querySelector('.ia_r');box.scrollTop=box.scrollHeight;
     const fmt=x=>esc(x).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/^- /gm,'• ');
