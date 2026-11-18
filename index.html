@@ -449,7 +449,18 @@ function modalIA(){reabrir=null;
   <div class="campo"><textarea id="ia_q" rows="2" placeholder="Escreva sua pergunta…" style="width:100%"></textarea></div>
   <div class="erro"></div><div class="rodape"><button id="cx">Fechar</button><button class="primary" id="ok">Perguntar</button></div>`);
   $('cx').onclick=fechar;const q=$('ia_q');q.focus();q.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('ok').click();}});
-  $('ok').onclick=()=>rodar($('ok'),async()=>{const t=val('ia_q');if(!t)return;const r=await iaChamar({acao:'perguntar',pergunta:t});IA_HIST.push({q:t,r:r.resposta||''});log('acao','Perguntou ao assistente');modalIA();});}
+  $('ok').onclick=()=>rodar($('ok'),async()=>{const t=val('ia_q');if(!t)return;q.value='';
+    const h={q:t,r:''};IA_HIST.push(h);const box=$('ia_hist');
+    box.insertAdjacentHTML('beforeend',`<div class="item"><b>Você:</b> ${esc(t)}<div class="ia_r" style="margin-top:6px;white-space:pre-wrap"><span class="meta">Pensando…</span></div></div>`);
+    const alvo=box.lastElementChild.querySelector('.ia_r');box.scrollTop=box.scrollHeight;
+    const fmt=x=>esc(x).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/^- /gm,'• ');
+    const {data:{session}}=await sb.auth.getSession();
+    const resp=await fetch(SUPABASE_URL+'/functions/v1/ia',{method:'POST',headers:{'Content-Type':'application/json',apikey:SUPABASE_KEY,Authorization:'Bearer '+(session?session.access_token:SUPABASE_KEY)},body:JSON.stringify({acao:'perguntar',pergunta:t})});
+    if(!resp.ok||/json/.test(resp.headers.get('content-type')||'')){let m='Falha na IA';try{const j=await resp.json();m=j.erro||m;}catch(e){}IA_HIST.pop();alvo.innerHTML='<span class="warn">'+esc(m)+'</span>';throw new Error(m);}
+    const rd=resp.body.getReader(),dc=new TextDecoder();
+    while(true){const {value,done}=await rd.read();if(done)break;h.r+=dc.decode(value,{stream:true});alvo.innerHTML=fmt(h.r);box.scrollTop=box.scrollHeight;}
+    if(!h.r)alvo.innerHTML='<span class="meta">Sem resposta. Tente de novo.</span>';
+    log('acao','Perguntou ao assistente');q.focus();});}
 function campoArquivos(id,rot){return `<div class="campo"><label>${rot||'Anexos (recibos, invoices, comprovantes, fotos)'} <span style="font-weight:400;color:var(--mut)">(opcional)</span></label>
   <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><label class="btnfile">📷 Escanear com a câmera<input id="${id}_cam" type="file" accept="image/*" capture="environment" multiple class="hidden" onchange="this.parentNode.firstChild.textContent='📷 '+this.files.length+' foto(s) prontas '"></label>
   <input id="${id}" type="file" multiple accept="image/*,application/pdf,.xls,.xlsx,.doc,.docx,.csv,.txt" style="flex:1;min-width:200px"></div></div>`;}
