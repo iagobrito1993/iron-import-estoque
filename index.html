@@ -363,7 +363,7 @@ async function carregar(){
     const envSel=C_ENV+', remessa_etapas('+C_ETAPA+'), envios_custo(frete,imposto,frete_unit,cotacao,custos_lancados,valor_pago_brl), remessa_volumes(*), alfandega_eventos('+C_ALF+'), envio_itens(id,produto_id,qtd_enviada,qtd_recebida,qtd_divergencia,qtd_baixada, remessa_lotes(qtd,compra_id), envio_itens_custo(custo_medio_saida,custo_usd_saida,frete_unit,imposto_unit,custo_br,do_estoque_eua), encaminhamentos(id,qtd,destino,conta,envio,data,obs,criado_por,criado_em))';
     const R={produtos:sb.from('produtos').select('id,nome,sku,ean,upc,variacao,codigo_caixa,un_por_caixa,foto_url,produtos_custo(qtd_eua,qtd_reservada_eua)').order('nome'),
       envios:sel('envios',envSel,{lim:600}),perfis:sb.from('perfis').select('*').order('nome'),
-      depósitos:sel('warehouses','*',{asc:true}),participantes:sel('participantes','*',{c:'nome',asc:true}),contas:sel('contas','*',{c:'nome',asc:true}),
+      warehouses:sel('warehouses','*',{asc:true}),participantes:sel('participantes','*',{c:'nome',asc:true}),contas:sel('contas','*',{c:'nome',asc:true}),
       divergencias:sel('divergencias'),chegadas:sel('chegadas','*, chegada_itens(*)',{lim:1500}),entradas:sel('entradas_br','*',{asc:true,lim:5000}),
       full:sel('envios_full',C_FULL+', envio_full_itens(*, envio_full_lotes(qtd,entrada_br_id)), full_recebimentos(*, full_receb_itens(*))',{lim:800}),anexos:sel('anexos','*',{lim:5000}),
       ajustes:sel('ajustes_estoque','*',{lim:500})};
@@ -582,7 +582,7 @@ function abaPainel(){
    <b>Fluxo:</b> compra nos EUA → estoque EUA → remessa Aladin até o Paraguai → travessia com freteiro → transporte até São Paulo → conferência no Depósito SP → Full. Remessas DHL / etiquetas avulsas seguem a rota direta.<br>
    <b>Sigilo:</b> custos, fretes, impostos, pagamentos, gastos e aportes aparecem só para o administrador e os sócios. O perfil EUA lança os valores, mas não os vê depois. Usuários e acessos: só o administrador.<br>
    <b>Ocorrências:</b> faltas, avarias e produtos errados são lançados na própria conferência e não entram no estoque.<br>
-   <b>Automático:</b> cotação do dólar comercial (atualizada a cada 30 min, pode ser alterada em cada lançamento) · link direto de rastreio DHL/Aladin · leitura do código de barras pela câmera do celular.<br>
+   <b>Automático:</b> dólar efetivo calculado no fechamento em reais de cada remessa · link direto de rastreio DHL/Aladin · leitura do código de barras pela câmera do celular.<br>
    <b>Integrações pendentes:</b> atualização automática do status da remessa pela API da DHL (precisa da chave de API da DHL) · confirmação automática do recebimento no Full pela API do Mercado Livre/Amazon (precisa de um aplicativo cadastrado no Mercado Livre).<br>
    <b>Dados demonstrativos:</b> nenhum — tudo o que aparece aqui foi lançado no sistema.</div>`:''}`;
 }
