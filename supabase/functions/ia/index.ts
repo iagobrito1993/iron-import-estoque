@@ -77,33 +77,59 @@ Produtos cadastrados (id | nome | sku | ean | upc): ${produtos.map((p: any) => [
         verValores ? sb.rpc("dados_sigilosos") : Promise.resolve({ data: null }),
         verValores ? sb.from("envios_custo").select("envio_id,frete,imposto,cotacao,custos_lancados,valor_pago_brl") : Promise.resolve({ data: null }),
       ]);
-      // resumo compacto (menos texto = resposta mais rápida)
+      // resumo já calculado (a IA só lê, não precisa fazer contas)
       const um = (x: any) => Array.isArray(x) ? x[0] : x;
-      const dep: Record<string, number> = {};
-      (ent.data || []).forEach((e: any) => { const k = e.produto_id + "@" + e.warehouse_id; dep[k] = (dep[k] || 0) + e.qtd - e.qtd_alocada; });
       const whN: Record<number, string> = {}; (wh.data || []).forEach((w: any) => whN[w.id] = w.nome);
       const cm: Record<number, any> = {}; ((sig as any).data?.produtos_custo || []).forEach((c: any) => cm[c.produto_id] = c);
-      const produtos = (prod.data || []).map((p: any) => { const c = um(p.produtos_custo) || {}; const d = Object.entries(dep).filter(([k, v]) => k.startsWith(p.id + "@") && v).map(([k, v]) => whN[+k.split("@")[1]] + ":" + v).join(",");
-        return [p.id, p.nome, p.sku || p.ean || "", c.qtd_eua || 0, c.qtd_reservada_eua || 0, d, verValores && cm[p.id] ? +(+cm[p.id].custo_medio_usd).toFixed(2) : undefined]; });
       const fech: Record<number, any> = {}; ((ec as any).data || []).forEach((c: any) => fech[c.envio_id] = c);
-      const remessas = (env.data || []).map((r: any) => ({ id: r.id, t: r.transportadora, st: r.status, etapa: r.etapa, rota: r.rota, saida: r.data_saida, prev: r.previsao, rast: r.rastreio || undefined,
-        etapas: (r.remessa_etapas || []).map((e: any) => [e.etapa, e.data, e.responsavel]),
-        itens: (r.envio_itens || []).map((i: any) => [i.produto_id, i.qtd_enviada, i.qtd_recebida || 0, Math.max(i.qtd_enviada - (i.qtd_recebida || 0) - (i.qtd_divergencia || 0) - (i.qtd_baixada || 0), 0)]),
-        fech: verValores && fech[r.id]?.custos_lancados ? { pago_brl: fech[r.id].valor_pago_brl, dolar: fech[r.id].cotacao, frete: fech[r.id].frete, imposto: fech[r.id].imposto } : undefined }));
-      const despachos = (full.data || []).map((f: any) => [f.id, /flex/i.test(f.marketplace) ? "Flex" : /ag[eê]ncia/i.test(f.marketplace) ? "Agência" : "Full", f.conta, f.cd_destino, f.destino, f.identificador, f.status, f.data_saida, f.rastreio, (f.envio_full_itens || []).map((i: any) => [i.produto_id, i.qtd, i.qtd_recebida])]);
-      const compras = (ped.data || []).map((p: any) => [p.id, p.fornecedor, p.numero, p.data, p.status, (p.pedido_itens || []).map((i: any) => [i.produto_id, i.qtd, i.qtd_aprovada])]);
-      const sys = `Você é o assistente do sistema de estoque da Iron Import. Responda em português do Brasil, curto e direto, com números exatos tirados dos DADOS. Use nomes de produtos (não ids).
-Fluxo: compra EUA → estoque EUA → remessa (rota Paraguai: aladin → paraguai → freteiro → transporte_sp; ou rota direta) → depósito (Estoque Brasil) → Full ou despachos Flex/Agência (Mercado Livre).
+      const nomeP: Record<number, string> = {}; (prod.data || []).forEach((p: any) => nomeP[p.id] = p.nome);
+      const NA_ALF = ["alfandega", "fiscalizacao", "aguardando_doc", "aguardando_pag", "retida"];
+      const EM_TRANS = ["transito", "liberada", "parcial", ...NA_ALF];
+      const ETQ: Record<string, string> = { aladin: "Aladin a caminho do Paraguai", paraguai: "No Paraguai", freteiro: "Com o freteiro", transporte_sp: "Transporte até SP", direta: "Rota direta (DHL/etiquetas)", alfandega: "Na alfândega" };
+      const P: Record<number, any> = {};
+      const pp = (id: number) => P[id] ||= { produto: nomeP[id] || ("#" + id), eua_disponivel: 0, eua_reservado: 0, em_transito: {} as Record<string, number>, deposito_livre: {} as Record<string, number>, deposito_reservado: 0, a_caminho_do_full: 0, no_full: 0, despachos_abertos: 0 };
+      (prod.data || []).forEach((p: any) => { const c = um(p.produtos_custo) || {}; const x = pp(p.id); x.sku = p.sku || p.ean || undefined; x.eua_disponivel = c.qtd_eua || 0; x.eua_reservado = c.qtd_reservada_eua || 0;
+        if (verValores && cm[p.id]) x.custo_medio_usd = +(+cm[p.id].custo_medio_usd).toFixed(2); });
+      (ent.data || []).forEach((e: any) => { const l = e.qtd - e.qtd_alocada; if (!l) return; const x = pp(e.produto_id); const w = whN[e.warehouse_id] || "Depósito"; x.deposito_livre[w] = (x.deposito_livre[w] || 0) + l; });
+      (env.data || []).forEach((r: any) => { if (!EM_TRANS.includes(r.status)) return;
+        const k = NA_ALF.includes(r.status) ? "alfandega" : r.rota === "paraguai" ? (r.etapa || "aladin") : "direta";
+        (r.envio_itens || []).forEach((i: any) => { const pend = Math.max(i.qtd_enviada - (i.qtd_recebida || 0) - (i.qtd_divergencia || 0) - (i.qtd_baixada || 0), 0); if (!pend) return; const x = pp(i.produto_id); x.em_transito[ETQ[k]] = (x.em_transito[ETQ[k]] || 0) + pend; }); });
+      (full.data || []).forEach((f: any) => { const desp = /flex|ag[eê]ncia/i.test(f.marketplace);
+        (f.envio_full_itens || []).forEach((i: any) => { const x = pp(i.produto_id); const pend = Math.max(i.qtd - (i.qtd_recebida || 0), 0);
+          if (["preparacao", "conferido"].includes(f.status)) { x.deposito_reservado += i.qtd; if (desp) x.despachos_abertos += i.qtd; }
+          else if (["enviado", "parcial", "divergencia"].includes(f.status)) { if (desp) x.despachos_abertos += pend; else x.a_caminho_do_full += pend; }
+          if (!desp) x.no_full += i.qtd_recebida || 0; }); });
+      const estoque = Object.values(P).filter((x: any) => x.eua_disponivel || x.eua_reservado || Object.keys(x.em_transito).length || Object.keys(x.deposito_livre).length || x.deposito_reservado || x.a_caminho_do_full || x.no_full || x.despachos_abertos);
+      const soma = (f: (x: any) => number) => estoque.reduce((s: number, x: any) => s + f(x), 0);
+      const transTot: Record<string, number> = {}; estoque.forEach((x: any) => Object.entries(x.em_transito).forEach(([k, v]) => transTot[k] = (transTot[k] || 0) + (v as number)));
+      const depTot: Record<string, number> = {}; estoque.forEach((x: any) => Object.entries(x.deposito_livre).forEach(([k, v]) => depTot[k] = (depTot[k] || 0) + (v as number)));
+      const totais = { eua_disponivel: soma(x => x.eua_disponivel), eua_reservado_em_remessas: soma(x => x.eua_reservado), em_transito_por_etapa: transTot, em_transito_total: Object.values(transTot).reduce((a, b) => a + b, 0),
+        deposito_disponivel: depTot, deposito_reservado: soma(x => x.deposito_reservado), a_caminho_do_full: soma(x => x.a_caminho_do_full), no_full: soma(x => x.no_full), unidades_em_despachos_abertos: soma(x => x.despachos_abertos) };
+      const remessas = (env.data || []).map((r: any) => ({ remessa: r.id, transportadora: r.transportadora, situacao: r.status, rota: r.rota, etapa_atual: r.rota === "paraguai" ? ETQ[r.etapa || "aladin"] : undefined, saida: r.data_saida, previsao: r.previsao || undefined, rastreio: r.rastreio || undefined,
+        etapas_lancadas: (r.remessa_etapas || []).map((e: any) => `${ETQ[e.etapa] || e.etapa} em ${e.data}${e.responsavel ? " (" + e.responsavel + ")" : ""}`),
+        produtos: (r.envio_itens || []).map((i: any) => `${nomeP[i.produto_id]}: enviado ${i.qtd_enviada}, conferido no depósito ${i.qtd_recebida || 0}`),
+        fechamento_em_reais: verValores ? (fech[r.id]?.custos_lancados ? { pago_brl: fech[r.id].valor_pago_brl, dolar_efetivo: fech[r.id].cotacao, fretes_brl: fech[r.id].frete, impostos_brl: fech[r.id].imposto } : "pendente") : undefined }));
+      const SD: Record<string, string> = { preparacao: "a despachar", conferido: "separado", enviado: "em rota/postado", parcial: "entregue em parte", recebido: "entregue", divergencia: "com ocorrência" };
+      const despachos = (full.data || []).map((f: any) => ({ id: f.id, tipo: /flex/i.test(f.marketplace) ? "Flex" : /ag[eê]ncia/i.test(f.marketplace) ? "Agência" : "Full", conta: f.conta || undefined, cliente: f.cd_destino || undefined, destino: f.destino || undefined, venda: f.identificador || undefined, situacao: SD[f.status] || f.status, data: f.data_saida || undefined, rastreio: f.rastreio || undefined,
+        produtos: (f.envio_full_itens || []).map((i: any) => `${nomeP[i.produto_id]} x${i.qtd}`) }));
+      const compras = (ped.data || []).map((p: any) => ({ compra: p.id, fornecedor: p.fornecedor, numero: p.numero || undefined, data: p.data, situacao: p.status, produtos: (p.pedido_itens || []).map((i: any) => `${nomeP[i.produto_id]}: comprado ${i.qtd}, recebido ${i.qtd_aprovada}`) }));
+      const sys = `Você é o assistente do sistema de estoque da Iron Import. Responda em português do Brasil, de forma clara e organizada, usando APENAS os DADOS abaixo — copie os números exatamente, não recalcule nem estime.
+Fluxo: compra nos EUA → estoque EUA → remessa (rota Paraguai: Aladin → Paraguai → freteiro → transporte até SP; ou rota direta DHL/etiquetas) → depósito (Estoque Brasil) → Full ou despachos Flex/Agência do Mercado Livre.
+Para perguntas gerais como "como está meu estoque", comece pelos TOTAIS por localização (EUA, em trânsito por etapa, depósito, Full, despachos) e depois destaque os principais produtos.
 Usuário: ${perfil.nome} (perfil ${perfil.papel}). ${verValores ? "Ele pode ver valores." : "NUNCA informe valores, custos, fretes, preços, impostos ou pagamentos; se perguntarem, diga que é informação restrita."}
-Se não estiver nos dados, diga que não encontrou. Não invente. Hoje: ${new Date().toISOString().slice(0, 10)}.
-Formatos: produtos=[id,nome,sku,qtd_eua,reservado_eua,deposito "nome:qtd"${verValores ? ",custo_medio_usd" : ""}]; remessas.itens=[produto_id,enviado,recebido_no_deposito,pendente]; despachos=[id,tipo,conta_ML,cliente,destino,venda,status,data,rastreio,itens[[produto_id,qtd,entregue]]] (status: preparacao=a despachar, enviado=em rota/postado, recebido=entregue); compras=[id,fornecedor,nº,data,status,itens[[produto_id,qtd,recebido]]].
-DADOS: ${JSON.stringify({ produtos, remessas, despachos, compras })}`;
+Se a informação não estiver nos dados, diga que não encontrou — nunca invente. Hoje: ${new Date().toISOString().slice(0, 10)}.
+DADOS:
+TOTAIS = ${JSON.stringify(totais)}
+ESTOQUE_POR_PRODUTO = ${JSON.stringify(estoque)}
+REMESSAS = ${JSON.stringify(remessas)}
+DESPACHOS_E_FULL = ${JSON.stringify(despachos)}
+COMPRAS = ${JSON.stringify(compras)}`;
       const key = Deno.env.get("ANTHROPIC_API_KEY");
       if (!key) return json({ erro: "A chave da IA ainda não foi configurada." }, 500);
       const r = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-        body: JSON.stringify({ model: MODELO_RAPIDO, max_tokens: 1200, stream: true, system: sys, messages: [{ role: "user", content: q }] }),
+        body: JSON.stringify({ model: MODELO, max_tokens: 1500, stream: true, system: sys, messages: [{ role: "user", content: q }] }),
       });
       if (!r.ok || !r.body) { const t = await r.text(); return json({ erro: "IA: " + t.slice(0, 300) }, 500); }
       // repassa só o texto, em tempo real
@@ -112,7 +138,7 @@ DADOS: ${JSON.stringify({ produtos, remessas, despachos, compras })}`;
         const rd = r.body!.getReader(); let buf = "";
         while (true) { const { value, done } = await rd.read(); if (done) break; buf += dec.decode(value, { stream: true });
           let i; while ((i = buf.indexOf("\n")) >= 0) { const l = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
-            if (!l.startsWith("data:")) continue; try { const ev = JSON.parse(l.slice(5)); if (ev.type === "content_block_delta" && ev.delta?.text) ctrl.enqueue(enc.encode(ev.delta.text)); } catch (_) { /* ignora */ } } }
+            if (!l.startsWith("data:")) continue; try { const ev = JSON.parse(l.slice(5)); if (ev.type === "content_block_delta" && ev.delta?.text) ctrl.enqueue(enc.encode(ev.delta.text)); else if (ev.type === "error") ctrl.enqueue(enc.encode("\n\n(A IA teve um problema: " + (ev.error?.message || "erro") + ". Tente de novo.)")); } catch (_) { /* ignora */ } } }
         ctrl.close(); } });
       return new Response(saida, { headers: { ...CORS, "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-cache" } });
     }
