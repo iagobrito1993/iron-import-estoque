@@ -524,7 +524,7 @@ function abasDoPapel(){
   if(tem('compras')||verCusto())a.push(['compras','Compras']);
   if(tem('receber_compras')||tem('compras'))a.push(['receb','Recebimento']);
   a.push(['eua','Estoque EUA']);
-  a.push(['remessas','Remessas']);a.push(['brasil','Warehouse Brasil']);a.push(['full','Full']);
+  a.push(['remessas','Remessas']);a.push(['brasil','Estoque Brasil']);a.push(['full','Full']);
   if(tem('ver_financeiro'))a.push(['gastos','Gastos']);
   if(tem('ver_aportes'))a.push(['aportes','Aportes']);
   if(ehAdmin()){a.push(['usuarios','Usuários']);a.push(['cadastros','Cadastros']);a.push(['acessos','Acessos']);}
@@ -655,7 +655,7 @@ function modalProduto(pid){
   <div>${p.foto_url?`<img class="fotog" src="${esc(p.foto_url)}" alt="" id="pf_img" style="cursor:zoom-in">`:`<div class="fotovazia"><div class="ic ph">📷</div>Este produto ainda não tem foto.</div>`}</div>
   ${podeFoto()?`<input id="pf_arq" type="file" accept="image/*" class="hidden"><div class="rodape" style="justify-content:flex-start;margin-top:10px"><button class="primary" id="pf_tirar">${p.foto_url?'Trocar foto':'Anexar foto'}</button>${p.foto_url?'<button class="danger" id="pf_rem">Remover foto</button>':''}</div>`:''}
   <div class="resumo" style="margin-top:14px">${kpi(un(c.qtd_eua),'Disponível EUA')}${kpi(un(c.qtd_reservada_eua),'Reservado EUA')}${kpi(un(ti.t),'Trânsito internacional')}${kpi(un(ti.a),'Na alfândega')}
-   ${kpi(un(b),'Warehouse Brasil')}${kpi(un(tf),'Indo para o Full')}${kpi(un(nf),'Confirmado no Full')}${verCusto()?kpi(usd(c.custo_medio_usd),'Custo médio nos EUA (US$)'):''}</div>
+   ${kpi(un(b),'Estoque Brasil')}${kpi(un(tf),'Indo para o Full')}${kpi(un(nf),'Confirmado no Full')}${verCusto()?kpi(usd(c.custo_medio_usd),'Custo médio nos EUA (US$)'):''}</div>
   <h3>Rastreabilidade</h3>
   ${verCusto()&&ent.length?`<div class="meta" style="margin-bottom:4px"><b>Entradas no estoque EUA</b></div><div class="scroll"><table class="planilha"><tr><th>Data</th><th>Origem</th><th class="n">Qtd</th><th class="n">US$</th></tr>${ent.map(e=>`<tr><td>${fd(e.data)}</td><td>${esc(e.obs||e.loja||'Compra')}</td><td class="n">${un(e.qtd)}</td><td class="n">${usd(e.custo_usd,4)}</td></tr>`).join('')}</table></div>`:''}
   ${rems.length?`<div class="meta" style="margin-bottom:4px"><b>Remessas DHL / Aladin</b></div><div class="scroll"><table class="planilha"><tr><th>Remessa</th><th>Situação</th><th class="n">Enviado</th><th class="n">Recebido BR</th><th>Origem do lote</th></tr>${rems.slice(0,15).map(({r,i})=>`<tr><td>#${r.id} ${esc(r.transportadora)}</td><td>${(ST_REM[r.status]||[r.status])[0]}</td><td class="n">${un(i.qtd_enviada)}</td><td class="n">${un(i.qtd_recebida)}</td><td>${(i.remessa_lotes||[]).map(l=>esc(origemLote(l))+': '+un(l.qtd)).join(' · ')||'—'}</td></tr>`).join('')}</table></div>`:''}
