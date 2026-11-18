@@ -198,6 +198,9 @@ const RES_DIV={aprovar:'Aprovada',repor:'Reposição',baixar:'Baixada',devolver:
 const CATS=['Ajudantes e mão de obra','Aluguel','Embalagens','Transporte e entregas','Frete internacional','Impostos e taxas','Sistemas','Outras despesas'];
 const MOEDAS=['USD','BRL','EUR','PYG'];
 const MARKETS=['Mercado Livre','Amazon','Outro'];
+const FLEX='Mercado Livre Flex';
+function isFlex(f){return /flex/i.test((f&&f.marketplace)||'');}
+const ST_FLEX={preparacao:['A despachar','b-prep'],conferido:['Separado','b-lib'],enviado:['Em rota de entrega','b-rota'],parcial:['Entregue em parte','b-par'],recebido:['Entregue','b-rec'],divergencia:['Com ocorrência','b-ret'],cancelado:['Cancelado','b-can']};
 const TIPOS_MOV={aporte:'Aporte de capital',emprestimo:'Empréstimo do participante',despesa_paga:'Despesa paga em nome da empresa',reembolso:'Reembolso ao participante',retirada:'Retirada'};
 const PERM_PAPEL={eua:['produtos','compras','receber_compras','remessas','alfandega'],brasil:['alfandega','warehouse','full'],socio:[]};
 const SO_ADMIN=['ver_custos','ver_financeiro','editar_financeiro','ver_aportes','editar_aportes'];
@@ -419,8 +422,8 @@ function estoqueBR(){const m={};const g=(w,p)=>{const k=w+':'+p;return m[k]=m[k]
 function brLivre(pid,w){return D.entradas.filter(e=>e.produto_id===pid&&(w==null||e.warehouse_id===w)).reduce((s,e)=>s+e.qtd-e.qtd_alocada,0);}
 function emTransitoInt(pid){let t=0,a=0;D.envios.forEach(r=>{if(!aCaminho(r.status)&&r.status!=='parcial')return;itensEnv(r).forEach(i=>{if(pid!=null&&i.produto_id!==pid)return;if(NA_ALF.includes(r.status))a+=i.pend;else t+=i.pend;});});return {t,a};}
 function fullPend(i){return Math.max(i.qtd-i.qtd_recebida-i.qtd_divergencia-i.qtd_baixada-i.qtd_devolvida,0);}
-function transitoFull(pid){let t=0;D.full.forEach(f=>{if(!['enviado','parcial','divergencia'].includes(f.status))return;(f.envio_full_itens||[]).forEach(i=>{if(pid==null||i.produto_id===pid)t+=fullPend(i);});});return t;}
-function noFull(pid){let t=0;D.full.forEach(f=>(f.envio_full_itens||[]).forEach(i=>{if(pid==null||i.produto_id===pid)t+=i.qtd_recebida;}));return t;}
+function transitoFull(pid){let t=0;D.full.forEach(f=>{if(isFlex(f))return;if(!['enviado','parcial','divergencia'].includes(f.status))return;(f.envio_full_itens||[]).forEach(i=>{if(pid==null||i.produto_id===pid)t+=fullPend(i);});});return t;}
+function noFull(pid){let t=0;D.full.filter(f=>!isFlex(f)).forEach(f=>(f.envio_full_itens||[]).forEach(i=>{if(pid==null||i.produto_id===pid)t+=i.qtd_recebida;}));return t;}
 function porEtapa(){const m={};D.envios.forEach(r=>{if(!aCaminho(r.status)||NA_ALF.includes(r.status))return;const k=etapaDe(r)||'direta';m[k]=(m[k]||0)+itensEnv(r).reduce((s,i)=>s+i.pend,0);});return m;}
 function divAbertas(){return D.divergencias.filter(d=>d.status==='aberta');}
 function pedPend(i){return Math.max(i.qtd-i.qtd_aprovada-i.qtd_divergencia-i.qtd_baixada,0);}
@@ -430,8 +433,10 @@ let reabrir=null;
 function anexosDe(ent,id){return D.anexos.filter(a=>a.entidade===ent&&a.entidade_id===id);}
 function anexosHtml(ent,id,pode=true){const l=anexosDe(ent,id);
   return `<div class="anx">${l.map(a=>`<span class="anxi"><button class="link" data-anx="${a.id}" type="button">📎 ${esc(a.nome||'arquivo')}</button>${ehAdmin()||a.criado_por===sessao.user.id?` <button class="link mut" data-anxdel="${a.id}" type="button">remover</button>`:''}</span>`).join('')||'<span class="meta">Nenhum anexo.</span>'}
-  ${pode?`<label class="btnfile">+ Anexar arquivo<input type="file" multiple data-anxup="${ent}:${id}" class="hidden"></label>`:''}</div>`;}
-function campoArquivos(id,rot){return `<div class="campo"><label>${rot||'Anexos (recibos, invoices, comprovantes, fotos)'} <span style="font-weight:400;color:var(--mut)">(opcional)</span></label><input id="${id}" type="file" multiple accept="image/*,application/pdf,.xls,.xlsx,.doc,.docx,.csv,.txt"></div>`;}
+  ${pode?`<label class="btnfile">📷 Escanear<input type="file" accept="image/*" capture="environment" data-anxup="${ent}:${id}" class="hidden"></label> <label class="btnfile">+ Anexar arquivo<input type="file" multiple data-anxup="${ent}:${id}" class="hidden"></label>`:''}</div>`;}
+function campoArquivos(id,rot){return `<div class="campo"><label>${rot||'Anexos (recibos, invoices, comprovantes, fotos)'} <span style="font-weight:400;color:var(--mut)">(opcional)</span></label>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><label class="btnfile">📷 Escanear com a câmera<input id="${id}_cam" type="file" accept="image/*" capture="environment" multiple class="hidden" onchange="this.parentNode.firstChild.textContent='📷 '+this.files.length+' foto(s) prontas '"></label>
+  <input id="${id}" type="file" multiple accept="image/*,application/pdf,.xls,.xlsx,.doc,.docx,.csv,.txt" style="flex:1;min-width:200px"></div></div>`;}
 async function subirAnexos(ent,id,files){
   for(const f of [...(files||[])]){
     if(f.size>20*1024*1024)throw new Error(f.name+': o limite é 20 MB por arquivo.');
@@ -443,8 +448,8 @@ async function subirAnexos(ent,id,files){
     await rpc('registrar_anexo',{p_entidade:ent,p_id:id,p_caminho:cam,p_nome:nomeArq,p_tipo:tipo,p_tamanho:corpo.size||f.size});
   }
 }
-async function anexarDepois(ent,id,inputId){const el=$(inputId);if(!el||!el.files||!el.files.length)return '';
-  try{await subirAnexos(ent,id,el.files);return ` ${el.files.length} anexo(s) enviado(s).`;}catch(e){return ' Atenção: anexo não enviado ('+msgErro(e)+').';}}
+async function anexarDepois(ent,id,inputId){const fs=[$(inputId),$(inputId+'_cam')].filter(e=>e&&e.files).flatMap(e=>[...e.files]);if(!fs.length)return '';
+  try{await subirAnexos(ent,id,fs);return ` ${fs.length} anexo(s) enviado(s).`;}catch(e){return ' Atenção: anexo não enviado ('+msgErro(e)+').';}}
 $('ov').addEventListener('click',async e=>{
   const a=e.target.closest('[data-anx]');if(a){const x=D.anexos.find(z=>z.id===+a.dataset.anx);if(!x)return;
     const w=window.open('','_blank');const {data,error}=await sb.storage.from('anexos').createSignedUrl(x.caminho,900);
@@ -524,7 +529,7 @@ function abasDoPapel(){
   if(tem('compras')||verCusto())a.push(['compras','Compras']);
   if(tem('receber_compras')||tem('compras'))a.push(['receb','Recebimento']);
   a.push(['eua','Estoque EUA']);
-  a.push(['remessas','Remessas']);a.push(['brasil','Estoque Brasil']);a.push(['full','Full']);
+  a.push(['remessas','Remessas']);a.push(['brasil','Estoque Brasil']);a.push(['full','Full']);a.push(['flex','Despachos Flex']);
   if(tem('ver_financeiro'))a.push(['gastos','Gastos']);
   if(tem('ver_aportes'))a.push(['aportes','Aportes']);
   if(ehAdmin()){a.push(['usuarios','Usuários']);a.push(['cadastros','Cadastros']);a.push(['acessos','Acessos']);}
@@ -533,7 +538,7 @@ function abasDoPapel(){
 function render(){
   if(!perfil||!perfil.papel)return;
   const abas=abasDoPapel();if(!abas.find(x=>x[0]===aba))aba=abas[0][0];
-  const conteudo={painel:abaPainel,produtos:abaProdutos,compras:abaCompras,receb:abaReceb,eua:abaEUA,remessas:abaRemessas,brasil:abaBrasil,full:abaFull,diverg:abaDiverg,gastos:abaGastos,aportes:abaAportes,usuarios:abaUsuarios,cadastros:abaCadastros,acessos:abaAcessos}[aba]();
+  const conteudo={painel:abaPainel,produtos:abaProdutos,compras:abaCompras,receb:abaReceb,eua:abaEUA,remessas:abaRemessas,brasil:abaBrasil,full:abaFull,flex:abaFlex,diverg:abaDiverg,gastos:abaGastos,aportes:abaAportes,usuarios:abaUsuarios,cadastros:abaCadastros,acessos:abaAcessos}[aba]();
   const ativo=document.activeElement&&document.activeElement.id==='busca';const pos=ativo?document.activeElement.selectionStart:0;
   $('app').innerHTML=`<div class="topo"><div class="wrap"><div class="marca">${logoHtml()}</div>
     <div class="quem"><span>${esc(perfil.nome||perfil.email)}</span><span class="badge b-pap">${PAPEIS[perfil.papel]}</span>
@@ -554,7 +559,7 @@ function abaPainel(){
   const alf=D.envios.filter(r=>NA_ALF.includes(r.status));
   const tf=transitoFull(null),nf=noFull(null),dv=divAbertas();
   const porWh=D.warehouses.map(w=>({w,l:br.filter(x=>x.wh===w.id).reduce((s,x)=>s+x.livre,0),r:br.filter(x=>x.wh===w.id).reduce((s,x)=>s+x.reserv,0)}));
-  const contas={};D.full.filter(f=>f.status!=='cancelado').forEach(f=>(f.envio_full_itens||[]).forEach(i=>{if(!i.qtd_recebida)return;const k=f.marketplace+(f.conta?' · '+f.conta:'');contas[k]=(contas[k]||0)+i.qtd_recebida;}));
+  const contas={};D.full.filter(f=>f.status!=='cancelado'&&!isFlex(f)).forEach(f=>(f.envio_full_itens||[]).forEach(i=>{if(!i.qtd_recebida)return;const k=f.marketplace+(f.conta?' · '+f.conta:'');contas[k]=(contas[k]||0)+i.qtd_recebida;}));
   let fin='';
   if(tem('ver_financeiro')){const m=hoje().slice(0,7);const L=D.lancamentos.filter(l=>l.situacao!=='cancelado');
     const mes=L.filter(l=>String(l.data).slice(0,7)===m),aPagar=L.filter(l=>l.situacao==='pendente');
@@ -575,7 +580,7 @@ function abaPainel(){
     ${ETAPAS.map(([k])=>kpi(un(pe[k]||0),ETAPA_CURTA[k],'remessas')).join('')}
     ${pe.direta?kpi(un(pe.direta),'Rota direta (DHL / etiquetas)','remessas'):''}${ti.a?kpi(un(ti.a)+' un. · '+alf.length+' remessa(s)','Na alfândega','remessas'):''}
     ${porWh.map(x=>kpi(un(x.l),'Estoque Brasil · '+esc(x.w.nome)+(x.r?' · '+un(x.r)+' reservado':''),'brasil')).join('')}
-    ${kpi(un(tf),'Em trânsito para o Full','full')}${kpi(un(nf),'Confirmado no Full','full')}
+    ${kpi(un(tf),'Em trânsito para o Full','full')}${kpi(un(nf),'Confirmado no Full','full')}${kpi(un(D.full.filter(f=>isFlex(f)&&['preparacao','conferido'].includes(f.status)).length),'Flex a despachar','flex')}${kpi(un(D.full.filter(f=>isFlex(f)&&['enviado','parcial'].includes(f.status)).length),'Flex em rota de entrega','flex')}
     ${Object.entries(contas).map(([k,v])=>kpi(un(v),'No Full · '+esc(k),'full')).join('')}</div>
   ${fin}${apo}
   ${ehAdmin()?`<h3>Situação do sistema</h3><div class="total">
@@ -834,7 +839,7 @@ function modalPedido(id){
    <div class="campo"><label>Forma de pagamento</label><select id="pd_fp"><option value="">—</option>${FORMAS.map(f=>`<option ${ed&&ed.forma_pagamento===f?'selected':''}>${f}</option>`).join('')}</select></div></div>
   <div class="duas"><div class="campo"><label>Situação do pagamento</label><select id="pd_sp"><option value="pago">Pago</option><option value="pendente" ${ed&&ed.situacao_pagamento==='pendente'?'selected':''}>A pagar</option></select></div>
    <div class="campo"><label>Observações</label><input id="pd_o" value="${v('obs')}"></div></div>
-  ${ed?'<h3>Anexos</h3>'+anexosHtml('pedido',ed.id):campoArquivos('pd_arq','Recibos, invoices e comprovantes')}
+  ${ed?'<h3>Anexos</h3>'+anexosHtml('pedido',ed.id):campoArquivos('pd_arq','Nota / invoice da compra e comprovantes de pagamento')}
   <div class="erro"></div><div class="rodape"><button id="cx">Cancelar</button><button class="primary" id="ok">${ed?'Salvar alterações':'Salvar compra'}</button></div>`);
   reabrir=ed?()=>modalPedido(id):null;
   const tab=$('pd_tab'),M=$('modal');
@@ -906,7 +911,7 @@ function modalPedidoDet(id){
   <h3>Produtos</h3>${tabelaItensPedido(p,verCusto())}
   <h3>Entregas recebidas</h3>${historicoReceb(id)}
   ${divergenciasHtml(dvs)}
-  <h3>Recibos, invoices e documentos</h3>${anexosHtml('pedido',id,tem('compras'))}
+  <h3>Nota / invoice e comprovantes</h3>${anexosHtml('pedido',id,tem('compras')||tem('receber_compras'))}
   <div class="erro"></div><div class="rodape">
    ${tem('compras')&&!temRec&&p.status!=='cancelada'?'<button class="danger" id="pc_canc">Cancelar compra</button>':''}
    ${tem('compras')&&p.status==='parcial'?'<button id="pc_enc">Encerrar com falta</button>':''}
@@ -950,7 +955,7 @@ function modalReceber(pid){
    <td class="n"><input data-ok="${i.id}" inputmode="numeric" placeholder="0"></td><td class="n"><input data-av="${i.id}" inputmode="numeric" placeholder="0"></td><td class="n"><input data-inc="${i.id}" inputmode="numeric" placeholder="0"></td><td class="n" data-rest="${i.id}"></td></tr>`;}).join('')}</table></div>
   <div class="total" id="rc_tot"></div>
   <div class="campo"><label>Observações</label><input id="rc_o" placeholder="ex.: caixa amassada, nota fiscal…"></div>
-  ${campoArquivos('rc_arq','Fotos e documentos da entrega')}
+  ${campoArquivos('rc_arq','Nota, comprovantes e fotos da entrega')}
   <div class="erro"></div><div class="rodape"><button id="cx">Voltar</button><button class="primary" id="ok">Confirmar recebimento</button></div>`);
   const M=$('modal'),g=(a,id)=>M.querySelector(`[data-${a}="${id}"]`);
   const calc=()=>{let tot=0,ex=0;its.forEach(i=>{const s=num(g('ok',i.id).value)+num(g('av',i.id).value)+num(g('inc',i.id).value),pd=pedPend(i);tot+=s;
@@ -1163,7 +1168,7 @@ function modalAlfandega(rid){const r=remessa(rid);reabrir=null;
   <div class="campo"><label>Documentos solicitados</label><input id="al_doc" placeholder="ex.: invoice, declaração, CPF do destinatário"></div>
   ${verCusto()||tem('alfandega')?`<div class="tres"><div class="campo"><label>Impostos</label><input id="al_im" inputmode="decimal" placeholder="0,00"></div><div class="campo"><label>Taxas</label><input id="al_tx" inputmode="decimal" placeholder="0,00"></div><div class="campo"><label>Moeda</label><select id="al_m"><option>BRL</option><option>USD</option></select></div></div>`:''}
   <div class="campo"><label>Observação</label><input id="al_o"></div>
-  ${campoArquivos('al_arq','Comprovantes e documentos')}
+  ${campoArquivos('al_arq','Comprovantes de impostos, taxas e documentos')}
   <div class="erro"></div><div class="rodape"><button id="cx">Voltar</button><button class="primary" id="ok">Registrar</button></div>`);
   $('cx').onclick=()=>modalDetalhe(rid);
   $('ok').onclick=()=>rodar($('ok'),async()=>{const eid=await rpc('atualizar_alfandega',{p:{envio_id:rid,status:$('al_s').value,data:val('al_d'),documentos:val('al_doc'),imposto:$('al_im')?dinheiro(val('al_im'))||0:0,taxas:$('al_tx')?dinheiro(val('al_tx'))||0:0,moeda:$('al_m')?$('al_m').value:'BRL',obs:val('al_o')}});
@@ -1181,7 +1186,7 @@ function modalChegada(rid){
    <td class="n"><input data-ok="${i.id}" inputmode="numeric" placeholder="0"></td><td class="n"><input data-av="${i.id}" inputmode="numeric" placeholder="0"></td><td class="n"><input data-inc="${i.id}" inputmode="numeric" placeholder="0"></td><td class="n" data-rest="${i.id}"></td></tr>`;}).join('')}</table></div>
   <div class="total" id="ch_tot"></div>
   <div class="campo"><label>Observação (faltas, avarias…)</label><input id="ch_o"></div>
-  ${campoArquivos('ch_arq','Fotos e comprovantes')}
+  ${campoArquivos('ch_arq','Comprovantes do freteiro/transporte, pagamento e fotos da chegada')}
   <div class="erro"></div><div class="rodape"><button id="cx">Voltar</button><button id="tudo" type="button">Preencher tudo como aprovado</button><button class="primary" id="ok">Confirmar conferência</button></div>`);
   const M=$('modal'),g=(a,id)=>M.querySelector(`[data-${a}="${id}"]`);
   const calc=()=>{let tot=0;it.forEach(i=>{const s=num(g('ok',i.id).value)+num(g('av',i.id).value)+num(g('inc',i.id).value);tot+=s;
@@ -1277,11 +1282,27 @@ function abaBrasil(){
 // ---------- ENVIO PARA O FULL ----------
 let filtroFull='abertos';
 function totFull(f){const it=f.envio_full_itens||[];return {q:it.reduce((s,i)=>s+i.qtd,0),r:it.reduce((s,i)=>s+i.qtd_recebida,0),d:it.reduce((s,i)=>s+i.qtd_divergencia,0),p:it.reduce((s,i)=>s+fullPend(i),0)};}
+let filtroFlex='abrir';
+function abaFlex(){const F=D.full.filter(isFlex);
+  const G={abrir:x=>['preparacao','conferido'].includes(x.status),rota:x=>['enviado','parcial'].includes(x.status),ent:x=>x.status==='recebido',oco:x=>x.status==='divergencia',todos:()=>true};
+  const lst=F.filter(G[filtroFlex]).filter(x=>bate('#'+x.id,x.conta,x.identificador,x.cd_destino,x.transporte,x.empresa,...(x.envio_full_itens||[]).map(i=>nomeP(i.produto_id))));
+  const n=fn=>F.filter(fn).length;
+  const porConta={};F.filter(x=>G.abrir(x)||G.rota(x)).forEach(x=>{const k=x.conta||'Sem conta';porConta[k]=(porConta[k]||0)+1;});
+  const entHoje=F.filter(x=>x.status==='recebido'&&String(x.data_saida||'').slice(0,10)===hoje()).length;
+  return barraBusca('Buscar despacho, nº da venda, conta, cliente, entregador ou produto…',tem('full')?'<button class="primary" data-act="flex">+ Despacho Flex</button>':'')+
+  `<div class="resumo">${kpi(un(n(G.abrir)),'A despachar')}${kpi(un(n(G.rota)),'Em rota de entrega')}${kpi(un(entHoje),'Entregues hoje')}${Object.entries(porConta).map(([k,v])=>kpi(un(v),'Abertos · '+esc(k))).join('')}</div>
+  <div class="chips" style="margin-bottom:10px">${chip(filtroFlex,'abrir','A despachar ('+n(G.abrir)+')','fflex')}${chip(filtroFlex,'rota','Em rota ('+n(G.rota)+')','fflex')}${chip(filtroFlex,'ent','Entregues','fflex')}${chip(filtroFlex,'oco','Com ocorrência ('+n(G.oco)+')','fflex')}${chip(filtroFlex,'todos','Todos','fflex')}</div>
+  <div class="lista">${lst.length?lst.map(x=>{const t=totFull(x);return `<div class="card click" data-full="${x.id}"><div><div class="t">Flex #${x.id}${x.conta?' · '+esc(x.conta):''} ${bdg(ST_FLEX,x.status)}</div>
+    <div class="meta">${x.identificador?'Venda <b>'+esc(x.identificador)+'</b> · ':''}${esc(wh(x.warehouse_id).nome)} → ${esc(x.cd_destino||'cliente')}${x.transporte?' · entregador '+esc(x.transporte):''}${x.data_saida?' · '+fd(x.data_saida):''}</div>
+    <div class="meta">${(x.envio_full_itens||[]).map(i=>esc(nomeP(i.produto_id))+' × '+un(i.qtd)).join(' · ')}</div></div>
+    <div class="dir"><div class="n">${un(t.q)} un.</div><button class="small">Abrir</button></div></div>`;}).join(''):'<div class="vazio">Nenhum despacho aqui.</div>'}</div>
+  <div class="total" style="margin-top:12px"><b>Contas do Mercado Livre:</b> cada despacho fica ligado à conta que vendeu. Os produtos saem do Estoque Brasil quando o despacho é criado (reserva) e baixam quando ele é marcado como entregue. A importação automática das vendas Flex de cada conta entra quando as contas forem conectadas ao sistema.</div>`;
+}
 function abaFull(){
   const f={abertos:x=>['preparacao','conferido'].includes(x.status),transito:x=>['enviado','parcial'].includes(x.status),div:x=>x.status==='divergencia',rec:x=>x.status==='recebido',todos:()=>true}[filtroFull];
-  const lst=D.full.filter(f).filter(x=>bate('#'+x.id,x.marketplace,x.conta,x.identificador,x.cd_destino,...(x.envio_full_itens||[]).map(i=>nomeP(i.produto_id))));
-  const n=fn=>D.full.filter(fn).length;
-  const contas={};D.full.filter(x=>x.status!=='cancelado').forEach(x=>(x.envio_full_itens||[]).forEach(i=>{if(!i.qtd_recebida)return;const k=x.marketplace+(x.conta?' · '+x.conta:'');contas[k]=(contas[k]||0)+i.qtd_recebida;}));
+  const lst=D.full.filter(x=>!isFlex(x)).filter(f).filter(x=>bate('#'+x.id,x.marketplace,x.conta,x.identificador,x.cd_destino,...(x.envio_full_itens||[]).map(i=>nomeP(i.produto_id))));
+  const n=fn=>D.full.filter(x=>!isFlex(x)).filter(fn).length;
+  const contas={};D.full.filter(x=>x.status!=='cancelado'&&!isFlex(x)).forEach(x=>(x.envio_full_itens||[]).forEach(i=>{if(!i.qtd_recebida)return;const k=x.marketplace+(x.conta?' · '+x.conta:'');contas[k]=(contas[k]||0)+i.qtd_recebida;}));
   return barraBusca('Buscar envio, conta, identificador ou produto…',tem('full')?'<button class="primary" data-act="full">+ Envio para o Full</button>':'')+
   `<div class="resumo">${kpi(un(transitoFull(null)),'Em trânsito para o Full')}${Object.entries(contas).map(([k,v])=>kpi(un(v),'Confirmado · '+esc(k))).join('')||kpi('0','Confirmado no Full')}</div>
   <div class="chips" style="margin-bottom:10px">${chip(filtroFull,'abertos','Em preparação / conferidos ('+n(x=>['preparacao','conferido'].includes(x.status))+')','ffull')}${chip(filtroFull,'transito','Enviados ('+n(x=>['enviado','parcial'].includes(x.status))+')','ffull')}${chip(filtroFull,'div','Com divergência ('+n(x=>x.status==='divergencia')+')','ffull')}${chip(filtroFull,'rec','Recebidos','ffull')}${chip(filtroFull,'todos','Todos','ffull')}</div>
@@ -1290,26 +1311,29 @@ function abaFull(){
     ${['enviado','parcial','divergencia','recebido'].includes(x.status)?`<div class="meta">Recebido pelo Full <b>${un(t.r)}</b> de ${un(t.q)}${t.d?' · <b>'+un(t.d)+' em divergência</b>':''}</div>`:''}</div>
     <div class="dir"><div class="n">${un(t.q)} un.</div><button class="small">Abrir</button></div></div>`;}).join(''):'<div class="vazio">Nenhum envio aqui.</div>'}</div>`;
 }
-function modalFullNovo(){
+function rotularFlex(f){const m=$('modal');if(!m)return;const T=[[/Registrar recebimento no Full/,'Registrar entrega ao cliente'],[/Recebido Full/,'Entregue'],[/^Full #/,'Flex #'],[/Confirmar saída$/,'Saiu para entrega'],[/Recebido pelo Full/,'Entregue'],[/no Full/g,'ao cliente']];
+  m.querySelectorAll('h2,button,th,label,.sub,.meta').forEach(el=>{el.childNodes.forEach(nd=>{if(nd.nodeType===3){let t=nd.textContent;T.forEach(([a,b])=>t=t.replace(a,b));nd.textContent=t;}});});
+  const h=m.querySelector('h2 .badge');if(h&&ST_FLEX[f.status]){h.textContent=ST_FLEX[f.status][0];}}
+function modalFullNovo(flex){
   const ws=D.warehouses.filter(w=>w.ativo);let w=+lerPref('iron_wh',ws[0]?ws[0].id:0);if(!ws.find(x=>x.id===w)&&ws[0])w=ws[0].id;
-  const contas=[...new Set(D.full.map(f=>f.conta).filter(Boolean).concat(['Nexxcompany','Fortis Company']))],emps=[...new Set(D.full.map(f=>f.empresa).filter(Boolean))],cds=[...new Set(D.full.map(f=>f.cd_destino).filter(Boolean))];
+  const contas=[...new Set(D.full.filter(f=>!!flex===isFlex(f)).map(f=>f.conta).filter(Boolean).concat(flex?[]:['Nexxcompany','Fortis Company']))],emps=[...new Set(D.full.map(f=>f.empresa).filter(Boolean))],cds=[...new Set(D.full.map(f=>f.cd_destino).filter(Boolean))];
   zerarLidos();reabrir=null;
   const prods=()=>D.produtos.map(p=>({p,d:brLivre(p.id,w)})).filter(x=>x.d>0).sort((a,b)=>a.p.nome.localeCompare(b.p.nome));
-  abrir(`<h2>Novo envio para o Full</h2><div class="sub">Só aparecem produtos disponíveis no depósito escolhido. Os itens ficam reservados até a saída.</div>
+  abrir(`<h2>${flex?'Novo despacho Flex':'Novo envio para o Full'}</h2><div class="sub">Só aparecem produtos disponíveis no depósito escolhido. Os itens ficam reservados até a saída.</div>
   <div class="tres"><div class="campo"><label>Depósito de origem</label><select id="fu_w">${ws.map(x=>`<option value="${x.id}" ${x.id===w?'selected':''}>${esc(x.nome)}</option>`).join('')}</select></div>
-   <div class="campo"><label>Marketplace</label><select id="fu_m">${MARKETS.map(m=>`<option>${m}</option>`).join('')}</select></div>
-   <div class="campo"><label>Conta</label><input id="fu_c" list="dl_fc"><datalist id="dl_fc">${contas.map(c=>`<option value="${esc(c)}">`).join('')}</datalist></div></div>
+   ${flex?`<input type="hidden" id="fu_m" value="${FLEX}"><div class="campo"><label>Nº da venda / envio ML</label><input id="fu_id" placeholder="ex.: 2000012345678"></div>`:`<div class="campo"><label>Marketplace</label><select id="fu_m">${MARKETS.map(m=>`<option>${m}</option>`).join('')}</select></div>`}
+   <div class="campo"><label>${flex?'Conta do Mercado Livre':'Conta'}</label><input id="fu_c" list="dl_fc"><datalist id="dl_fc">${contas.map(c=>`<option value="${esc(c)}">`).join('')}</datalist></div></div>
   <div class="tres"><div class="campo"><label>Empresa vinculada</label><input id="fu_e" list="dl_fe"><datalist id="dl_fe">${emps.map(c=>`<option value="${esc(c)}">`).join('')}</datalist></div>
-   <div class="campo"><label>Centro de distribuição</label><input id="fu_cd" list="dl_fcd"><datalist id="dl_fcd">${cds.map(c=>`<option value="${esc(c)}">`).join('')}</datalist></div>
-   <div class="campo"><label>Identificador do envio</label><input id="fu_id" placeholder="nº do envio no marketplace"></div></div>
+   <div class="campo"><label>${flex?'Cliente / bairro de entrega':'Centro de distribuição'}</label><input id="fu_cd" list="dl_fcd"><datalist id="dl_fcd">${flex?'':cds.map(c=>`<option value="${esc(c)}">`).join('')}</datalist></div>
+   ${flex?'<div></div>':'<div class="campo"><label>Identificador do envio</label><input id="fu_id" placeholder="nº do envio no marketplace"></div>'}</div>
   <div class="tres"><div class="campo"><label>Data de saída prevista</label><input id="fu_d" type="date" value="${hoje()}"></div>
-   <div class="campo"><label>Transporte</label><input id="fu_t" value="Veículo particular"></div>
+   <div class="campo"><label>${flex?'Entregador / motoboy':'Transporte'}</label><input id="fu_t" value="${flex?'':'Veículo particular'}"></div>
    <div class="campo"><label>Responsável</label><input id="fu_r" value="${esc(eu())}"></div></div>
-  <div class="tres"><div class="campo"><label>Volumes</label><input id="fu_v" inputmode="numeric"></div><div class="campo"><label>Etiquetas</label><input id="fu_et" placeholder="ex.: 40 etiquetas ML"></div>
-   ${verCusto()?'<div class="campo"><label>Custo do transporte (R$)</label><input id="fu_cu" inputmode="decimal"></div>':'<div></div>'}</div>
-  ${scanHtml('Bipe os produtos que vão para o Full')}
+  <div class="tres"><div class="campo"><label>Volumes</label><input id="fu_v" inputmode="numeric"></div><div class="campo"><label>Etiquetas</label><input id="fu_et" placeholder="${flex?'etiqueta Flex':'ex.: 40 etiquetas ML'}"></div>
+   ${verCusto()?'<div class="campo"><label>'+(flex?'Custo da entrega (R$)':'Custo do transporte (R$)')+'</label><input id="fu_cu" inputmode="decimal"></div>':'<div></div>'}</div>
+  ${scanHtml(flex?'Bipe os produtos do pedido':'Bipe os produtos que vão para o Full')}
   <div class="tab rolar" id="fu_lst"></div><div class="total" id="fu_tot"></div>
-  <div class="campo"><label>Observação</label><input id="fu_o"></div>${campoArquivos('fu_arq','Etiquetas, autorizações e comprovantes')}
+  <div class="campo"><label>Observação</label><input id="fu_o"></div>${campoArquivos('fu_arq',flex?'Etiqueta, foto do pacote e comprovante de entrega':'Etiquetas, autorizações e comprovantes')}
   <div class="erro"></div><div class="rodape"><button id="cx">Cancelar</button><button class="primary" id="ok">Salvar (reservar)</button></div>`);
   const M=$('modal');let L=prods();const q=pid=>M.querySelector(`[data-fq="${pid}"]`);
   const des=()=>{L=prods();$('fu_lst').innerHTML=L.length?L.map(x=>`<div class="lin"><div class="pinfo">${foto(x.p,1)}<div>${esc(x.p.nome)}<div class="meta">${esc(x.p.sku||x.p.ean||'')} · <b>${un(x.d)}</b> disponível</div></div></div><input data-fq="${x.p.id}" inputmode="numeric" placeholder="0"></div>`).join(''):'<div class="lin">Nada disponível neste depósito.</div>';calc();};
@@ -1322,9 +1346,9 @@ function modalFullNovo(){
     gravarPref('iron_wh',String(w));
     rodar($('ok'),async()=>{const id=await rpc('criar_envio_full',{p:{chave,warehouse_id:w,marketplace:$('fu_m').value,conta:val('fu_c'),empresa:val('fu_e'),cd_destino:val('fu_cd'),identificador:val('fu_id'),data_saida:val('fu_d'),
       transporte:val('fu_t'),responsavel:val('fu_r'),volumes:val('fu_v')?num(val('fu_v')):null,etiquetas:val('fu_et'),custo:$('fu_cu')?dinheiro(val('fu_cu'))||0:0,obs:val('fu_o'),itens:s.map(x=>({produto_id:x.p.id,qtd:x.q}))}});
-      const ax=await anexarDepois('full',id,'fu_arq');pararCam();await carregar();toast('Envio Full #'+id+' em preparação. Itens reservados.'+ax);aba='full';filtroFull='abertos';modalFullDet(id);});};
+      const ax=await anexarDepois('full',id,'fu_arq');pararCam();await carregar();toast((flex?'Despacho Flex #':'Envio Full #')+id+' criado. Itens reservados.'+ax);aba=flex?'flex':'full';if(flex)filtroFlex='abrir';else filtroFull='abertos';modalFullDet(id);});};
 }
-function modalFullDet(id){const f=envFull(id);if(!f)return;reabrir=()=>modalFullDet(id);log('abriu','Envio Full #'+id);
+function modalFullDet(id){const f=envFull(id);if(!f)return;reabrir=()=>modalFullDet(id);log('abriu',(isFlex(f)?'Despacho Flex #':'Envio Full #')+id);setTimeout(()=>{if(isFlex(f))rotularFlex(f);},0);
   const it=f.envio_full_itens||[],t=totFull(f),dvs=D.divergencias.filter(d=>it.some(i=>i.id===d.full_item_id));
   const loteRem=l=>{const e=D.entradas.find(x=>x.id===l.entrada_br_id);if(!e)return '';const r=D.envios.find(v=>(v.envio_itens||[]).some(i=>i.id===e.envio_item_id));return r?'remessa #'+r.id:'devolução';};
   abrir(`<h2>Full #${f.id} · ${esc(f.marketplace)}${f.conta?' · '+esc(f.conta):''} ${bdg(ST_FULL,f.status)}</h2>
@@ -1569,7 +1593,7 @@ function abaAcessos(){
 
 // ---------- eventos ----------
 $('app').addEventListener('click',async e=>{
-  const t=e.target.closest('[data-aba],[data-act],[data-fe],[data-env],[data-prod],[data-ped],[data-receber],[data-conferir],[data-full],[data-resdiv],[data-lanc],[data-mov],[data-cad],[data-aud],[data-fped],[data-frec],[data-frem],[data-fwh],[data-ffull],[data-fdiv],[data-feua]');if(!t)return;
+  const t=e.target.closest('[data-aba],[data-act],[data-fe],[data-env],[data-prod],[data-ped],[data-receber],[data-conferir],[data-full],[data-resdiv],[data-lanc],[data-mov],[data-cad],[data-aud],[data-fped],[data-frec],[data-frem],[data-fwh],[data-ffull],[data-fflex],[data-fdiv],[data-feua]');if(!t)return;
   const d=t.dataset;
   if(d.receber){modalReceber(+d.receber);return;}
   if(d.conferir){modalChegada(+d.conferir);return;}
@@ -1583,7 +1607,7 @@ $('app').addEventListener('click',async e=>{
   if(d.cad){modalCad(d.cad,d.cadid?+d.cadid:null);return;}
   if(d.aud!=null){verAud=d.aud==='1';render();if(verAud){const r=await sb.from('auditoria').select('*').order('id',{ascending:false}).limit(400);AUD=r.data||[];render();}return;}
   if(d.aba){aba=d.aba;busca='';log('aba',t.textContent.trim());render();window.scrollTo(0,0);return;}
-  const fs={fped:v=>filtroPed=v,frec:v=>filtroRec=v,frem:v=>filtroRem=v,fwh:v=>filtroWh=v,ffull:v=>filtroFull=v,fdiv:v=>filtroDiv=v,feua:v=>filtroEUA=v};
+  const fs={fped:v=>filtroPed=v,frec:v=>filtroRec=v,frem:v=>filtroRem=v,fwh:v=>filtroWh=v,ffull:v=>filtroFull=v,fflex:v=>filtroFlex=v,fdiv:v=>filtroDiv=v,feua:v=>filtroEUA=v};
   for(const k in fs)if(d[k]){fs[k](d[k]);render();return;}
   const a=d.act;
   if(a==='sair')sb.auth.signOut();
@@ -1591,6 +1615,7 @@ $('app').addEventListener('click',async e=>{
   if(a==='pedido')modalPedido();
   if(a==='remessa')modalRemessa();
   if(a==='full')modalFullNovo();
+  if(a==='flex')modalFullNovo(true);
   if(a==='produto')modalNovoProduto();
   if(a==='lanc')modalLanc();
   if(a==='mov')modalMov();
