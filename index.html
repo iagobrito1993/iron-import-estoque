@@ -230,6 +230,9 @@ function toast(m){const t=$('toast');t.textContent=m;t.classList.remove('hidden'
 function papel(){return perfil&&perfil.papel;}
 function tem(p){if(!perfil||!perfil.papel)return false;if(perfil.papel==='admin')return true;if(SO_ADMIN.includes(p))return perfil.papel==='socio';return (perfil.perms||[]).includes(p)||(PERM_PAPEL[perfil.papel]||[]).includes(p);}
 function podeCusto(){return verCusto();}
+function podeLancarCusto(){return verCusto()||papel()==='eua';}
+function custoPendente(p){return ehEUA()?(D.custoPend||[]).includes(p.id):!(+custoP(p).custo_medio_usd>0);}
+function ehEUA(){return papel()==='eua';}
 function ehSocio(){return papel()==='socio';}
 // sócios lançam e visualizam, mas não editam, cancelam nem excluem o que já foi lançado
 const SEL_EDICAO='#pc_canc,#pc_enc,#pc_edt,[data-estr],[data-estch],#canc,#edt,#enc,#fe,#fc,#rota,[data-delet],#pf_aj,#pf_cod,#pf_rem,#lc_x,#mv_x,[data-anxdel],[data-resdiv]';
@@ -384,9 +387,10 @@ async function carregar(){
     if(verCusto()){R.vendas=sel('vendas_atacado','*, vendas_atacado_itens(*), vendas_parcelas(*)',{lim:2000});R.clientes=sel('clientes_atacado','*',{c:'nome',asc:true,lim:3000});}
     const ks=Object.keys(R),rs=await Promise.all(ks.map(k=>R[k]));
     const e=rs.find(x=>x.error);if(e)throw e.error;
-    const N={pedidos:[],recebimentos:[],compras:[],lancamentos:[],movimentos:[],acessos:[],vendas:[],clientes:[],custoSaida:{}};
+    const N={pedidos:[],recebimentos:[],compras:[],lancamentos:[],movimentos:[],acessos:[],vendas:[],clientes:[],custoSaida:{},custoPend:[]};
     ks.forEach((k,i)=>N[k]=rs[i].data||[]);
     if(verCusto()){mesclarSigilosos(N,await rpc('dados_sigilosos',{}));try{(await rpc('custo_saidas',{})||[]).forEach(x=>N.custoSaida[x.full_item_id]=x);}catch(e){}}
+    if(ehEUA()){try{N.custoPend=await rpc('produtos_custo_pendente',{})||[];}catch(e){N.custoPend=[];}}
     if(ehAdmin()){try{N.iaSaldo=await rpc('ia_saldo',{});}catch(e){N.iaSaldo=null;}}
     Object.assign(D,N);
   }catch(e){console.error(e);toast('Não foi possível atualizar os dados: '+msgErro(e));}
@@ -679,7 +683,7 @@ function abaProdutos(){
     return `<div class="card click" data-prod="${p.id}"><div class="pinfo">${foto(p)}<div><div class="t">${esc(p.nome)}${p.variacao?' <span class="meta">· '+esc(p.variacao)+'</span>':''}</div>
     <div class="meta">${[p.sku?'SKU '+esc(p.sku):'',p.ean?'EAN '+esc(p.ean):'',p.upc?'UPC '+esc(p.upc):'',!p.sku&&!p.ean&&!p.upc?'Sem código de barras':''].filter(Boolean).join(' · ')}</div>
     <div class="meta">${[c.qtd_eua?'<b>'+un(c.qtd_eua)+'</b> nos EUA':'',c.qtd_reservada_eua?'<b>'+un(c.qtd_reservada_eua)+'</b> reservado':'',ti.t+ti.a?'<b>'+un(ti.t+ti.a)+'</b> a caminho':'',f?'<b>'+un(f)+'</b> no Full':'',verCusto()&&+c.custo_medio_usd>0?'Custo <b>'+usd(c.custo_medio_usd,2)+'</b>':''].filter(Boolean).join(' · ')}</div>
-    ${verCusto()&&!(+c.custo_medio_usd>0)?'<div class="warn">⚠ Preço de custo a lançar</div>':''}${p.foto_url?'':'<div class="semfoto">Sem foto</div>'}</div></div>
+    ${(verCusto()||ehEUA())&&custoPendente(p)?'<div class="warn">⚠ Preço de custo a lançar</div>':''}${p.foto_url?'':'<div class="semfoto">Sem foto</div>'}</div></div>
     <div class="dir"><div class="n">${un(b)} un.</div><div class="meta">no Brasil</div></div></div>`;}).join('')
     :`<div class="vazio">${D.produtos.length?'Nada encontrado.':'Nenhum produto cadastrado ainda.'}</div>`}</div>`;
 }
@@ -745,7 +749,7 @@ function modalProduto(pid){
   ${rems.length?`<div class="meta" style="margin-bottom:4px"><b>Remessas DHL / Aladin</b></div><div class="scroll"><table class="planilha"><tr><th>Remessa</th><th>Situação</th><th class="n">Enviado</th><th class="n">Recebido BR</th><th>Origem do lote</th></tr>${rems.slice(0,15).map(({r,i})=>`<tr><td>#${r.id} ${esc(r.transportadora)}</td><td>${(ST_REM[r.status]||[r.status])[0]}</td><td class="n">${un(i.qtd_enviada)}</td><td class="n">${un(i.qtd_recebida)}</td><td>${(i.remessa_lotes||[]).map(l=>esc(origemLote(l))+': '+un(l.qtd)).join(' · ')||'—'}</td></tr>`).join('')}</table></div>`:''}
   ${fulls.length?`<div class="meta" style="margin-bottom:4px"><b>Envios para o Full</b></div><div class="scroll"><table class="planilha"><tr><th>Envio</th><th>Destino</th><th>Situação</th><th class="n">Qtd</th><th class="n">Recebido</th></tr>${fulls.slice(0,15).map(({f,i})=>`<tr><td>#${f.id}</td><td>${esc(f.marketplace)}${f.conta?' · '+esc(f.conta):''}</td><td>${ST_FULL[f.status][0]}</td><td class="n">${un(i.qtd)}</td><td class="n">${un(i.qtd_recebida)}</td></tr>`).join('')}</table></div>`:''}
   ${!ent.length&&!rems.length&&!fulls.length?'<div class="meta">Sem movimentação ainda.</div>':''}
-  <div class="erro"></div><div class="rodape">${ehAdmin()?'<button id="pf_aj">Ajustar estoque EUA</button>':''}${podeCusto()?'<button id="pf_etq">Etiquetas</button>'+(ehSocio()&&+c.custo_medio_usd>0?'':'<button class="primary" id="pf_cus">'+(+c.custo_medio_usd>0?'Alterar preço de custo':'Lançar preço de custo')+'</button>'):''}<button id="cx">Fechar</button></div>`);
+  <div class="erro"></div><div class="rodape">${ehAdmin()?'<button id="pf_aj">Ajustar estoque EUA</button>':''}${podeCusto()?'<button id="pf_etq">Etiquetas</button>'+(ehSocio()&&+c.custo_medio_usd>0?'':'<button class="primary" id="pf_cus">'+(+c.custo_medio_usd>0?'Alterar preço de custo':'Lançar preço de custo')+'</button>'):''}${ehEUA()&&custoPendente(p)?'<button class="primary" id="pf_cus">Lançar preço de custo</button>':''}<button id="cx">Fechar</button></div>`);
   $('cx').onclick=fechar;
   if($('pf_cod'))$('pf_cod').onclick=()=>modalCodigos(pid);
   if($('pf_cus'))$('pf_cus').onclick=()=>modalCustoProduto(pid);
@@ -775,8 +779,8 @@ function modalCustoProduto(pid){
   abrir(`<h2>Preço de custo — ${esc(p.nome)}</h2><div class="sub">Informe o custo unitário pago nos EUA. O sistema grava nas entradas e nos envios deste produto que estão sem custo e recalcula o custo médio. Frete e imposto continuam sendo lançados na remessa.</div>
   <div class="duas"><div class="campo"><label>Custo unitário (US$)</label><input id="cp_u" inputmode="decimal" placeholder="0,00" value="${temCusto?br(c.custo_medio_usd):''}"></div>
   <div class="campo"><label>Cotação do dólar (R$)</label><input id="cp_k" inputmode="decimal" placeholder="5,40" value="${esc(cotPadrao())}"></div></div>
-  <div class="meta">Sem custo agora: <b>${un(semC)}</b> entrada(s) e <b>${un(semE)}</b> item(ns) de remessa.</div>
-  <label class="meta" style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="cp_s" style="width:auto"> Substituir também o custo já lançado deste produto</label>
+  ${ehEUA()?'<div class="meta">O custo é gravado só nas entradas e envios deste produto que ainda estão sem custo. Depois de salvo, o valor não fica visível.</div>':''}<div class="meta"${ehEUA()?' style="display:none"':''}>Sem custo agora: <b>${un(semC)}</b> entrada(s) e <b>${un(semE)}</b> item(ns) de remessa.</div>
+  <label class="meta" style="display:${ehEUA()?'none':'flex'};gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="cp_s" style="width:auto"> Substituir também o custo já lançado deste produto</label>
   <div class="total" id="cp_prev"></div>
   <div class="erro"></div><div class="rodape"><button id="cx">Voltar</button><button class="primary" id="ok">Salvar preço de custo</button></div>`);
   const prev=()=>{const u=dinheiro(val('cp_u')),k=dinheiro(val('cp_k'));$('cp_prev').innerHTML=isNaN(u)||isNaN(k)?'Preencha custo e cotação.':`${usd(u,2)} × ${k.toLocaleString('pt-BR')} = <b>${brl(u*k,2)}</b> por unidade (sem frete e imposto)`;};
